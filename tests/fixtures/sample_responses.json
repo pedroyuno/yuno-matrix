@@ -1,0 +1,66 @@
+{
+  "authorize_success": {
+    "status_code": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "transaction_id": "txn_abc123",
+      "status": "authorized",
+      "auth_code": "AUTH456",
+      "amount": 100.00,
+      "currency": "USD",
+      "timestamp": "2026-01-29T12:00:00Z"
+    }
+  },
+  "capture_success": {
+    "status_code": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "transaction_id": "txn_abc123",
+      "status": "captured",
+      "amount": 100.00,
+      "currency": "USD",
+      "timestamp": "2026-01-29T12:01:00Z"
+    }
+  },
+  "purchase_success": {
+    "status_code": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "transaction_id": "txn_xyz789",
+      "status": "completed",
+      "amount": 50.00,
+      "currency": "USD",
+      "timestamp": "2026-01-29T12:02:00Z"
+    }
+  },
+  "refund_success": {
+    "status_code": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "transaction_id": "txn_xyz789",
+      "refund_id": "ref_123",
+      "status": "refunded",
+      "amount": 50.00,
+      "currency": "USD",
+      "timestamp": "2026-01-29T12:03:00Z"
+    }
+  },
+  "error_response": {
+    "status_code": 400,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "error": "Invalid card number",
+      "error_code": "INVALID_CARD"
+    }
+  }
+}

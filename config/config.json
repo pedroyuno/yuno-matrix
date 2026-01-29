@@ -1,0 +1,11 @@
+{
+  "api": {
+    "base_urls": {
+      "provider_a": "https://api.provider-a.com",
+      "provider_b": "https://api.provider-b.com"
+    },
+    "timeout": 30,
+    "retry_attempts": 3
+  },
+  "placeholder_mode": true
+}
