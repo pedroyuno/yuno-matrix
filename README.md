@@ -26,7 +26,52 @@ pip install -r requirements.txt
 
 # For development/testing
 pip install -r requirements-dev.txt
+
+# Set up Yuno API credentials
+cp .env.example .env
+# Edit .env and add your Yuno API keys
 ```
+
+## Yuno API Configuration
+
+### Setting Up Credentials
+
+MATRIX integrates with the Yuno Payment API. To use real API calls:
+
+1. **Copy the environment template:**
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Edit `.env` and add your credentials:**
+   ```bash
+   YUNO_PUBLIC_API_KEY=your_public_api_key_here
+   YUNO_PRIVATE_SECRET_KEY=your_private_secret_key_here
+   YUNO_ACCOUNT_ID=your_account_id_here
+   YUNO_ENVIRONMENT=sandbox  # or "production"
+   ```
+
+3. **Set placeholder mode to false in config:**
+   ```json
+   {
+     "placeholder_mode": false
+   }
+   ```
+
+### Getting Yuno Credentials
+
+Get your API keys from the [Yuno Dashboard](https://dashboard.y.uno):
+- Navigate to Settings → API Keys
+- Copy your Public API Key and Private Secret Key
+- Find your Account ID in Account Settings
+
+### Security Notes
+
+- ⚠️ **NEVER** commit `.env` file to version control
+- The `.env` file is already in `.gitignore`
+- Use `.env.example` as a template for other team members
+- Rotate credentials regularly
+- Use sandbox credentials for testing
 
 ## Usage
 
@@ -99,13 +144,62 @@ Test cases are defined in JSON format:
 
 ### Supported Operations
 
-- `authorize` - Payment authorization
-- `capture` - Capture authorized payment
-- `purchase` - Direct purchase (auth + capture)
-- `refund` - Refund a transaction
-- `void` - Void a transaction
-- `verify` - Verification operation
-- `tokenize` - Card tokenization
+- `payment` - Yuno payment API call (recommended for Yuno integration)
+- `authorize` - Payment authorization (Yuno: creates payment with capture=false)
+- `capture` - Capture authorized payment (Yuno: POST /payments/{id}/capture)
+- `purchase` - Direct purchase (auth + capture) (Yuno: creates payment with capture=true)
+- `refund` - Refund a transaction (Yuno: POST /payments/{id}/refund)
+- `void` - Void a transaction (Yuno: POST /payments/{id}/void)
+- `verify` - Verification operation (placeholder only)
+- `tokenize` - Card tokenization (placeholder only)
+
+### Yuno Payment Example
+
+See [examples/yuno_payment_testcase.json](examples/yuno_payment_testcase.json) for complete Yuno payment examples.
+
+**Basic Yuno Payment:**
+```json
+{
+  "step_id": 1,
+  "operation": "payment",
+  "provider": "safrapay",
+  "description": "Create Yuno payment",
+  "input_data": {
+    "description": "Test Payment",
+    "merchant_order_id": "order_123",
+    "country": "BR",
+    "amount": {
+      "currency": "BRL",
+      "value": 100
+    },
+    "customer_payer": {
+      "email": "customer@example.com",
+      "first_name": "John",
+      "last_name": "Doe"
+    },
+    "payment_method": {
+      "type": "CARD",
+      "detail": {
+        "card": {
+          "capture": true,
+          "installments": 1,
+          "card_data": {
+            "number": "4444585001234562",
+            "expiration_month": 12,
+            "expiration_year": 27,
+            "security_code": "123",
+            "holder_name": "John Doe"
+          }
+        }
+      }
+    }
+  },
+  "capture_variables": {
+    "payment_id": "$.body.id",
+    "transaction_id": "$.body.transaction_id"
+  }
+}
+```
 
 ## Development
 
@@ -141,26 +235,69 @@ yuno-matrix/
 │   ├── models.py          # Pydantic data models
 │   ├── parser.py          # JSON test case parser
 │   ├── context.py         # Variable context manager
-│   ├── api_client.py      # API client (placeholder mode)
+│   ├── api_client.py      # API client (Yuno API + placeholder mode)
 │   ├── logger.py          # Certification logger
 │   └── executor.py        # Test execution orchestrator
 ├── tests/                 # Unit and integration tests
 ├── examples/              # Example test case files
+│   ├── sample_testcase.json       # Generic examples
+│   └── yuno_payment_testcase.json # Yuno-specific examples
 ├── logs/                  # Execution logs (gitignored)
-├── config/                # Configuration files
+├── config/
+│   └── config.json        # Configuration with Yuno settings
+├── .env.example          # Template for API credentials
+├── .env                  # Your credentials (DO NOT COMMIT)
 ├── main.py               # CLI entry point
 └── README.md
 ```
 
-## Placeholder Mode
+## Operating Modes
 
-Currently running in **placeholder mode** with mock API responses. This allows testing the framework without actual API integration.
+MATRIX supports two operating modes:
 
-To implement real API calls:
-1. Update `src/api_client.py` with actual HTTP requests
-2. Add authentication/authorization logic
-3. Set `placeholder_mode: false` in config
-4. Configure provider base URLs
+### 1. Yuno API Mode (Real API Calls)
+
+When properly configured with credentials, MATRIX makes real HTTP calls to the Yuno Payment API:
+
+**Setup:**
+```bash
+# Configure credentials in .env
+cp .env.example .env
+# Edit .env with your Yuno API keys
+```
+
+```json
+// Set in config/config.json
+{
+  "placeholder_mode": false
+}
+```
+
+**Features:**
+- ✅ Real HTTP requests to Yuno API
+- ✅ Automatic authentication with API keys
+- ✅ Idempotency key generation
+- ✅ Full request/response logging
+- ✅ Support for all Yuno payment operations
+- ✅ Sandbox and production environments
+
+### 2. Placeholder Mode (Mock Responses)
+
+When credentials are not available or `placeholder_mode: true` is set, MATRIX uses mock responses:
+
+**Features:**
+- ✅ No API credentials required
+- ✅ Realistic mock responses with generated IDs
+- ✅ Fast execution for framework testing
+- ✅ Same logging and variable passing as real mode
+
+**Automatic Fallback:**
+If `placeholder_mode: false` but credentials are missing, MATRIX automatically falls back to placeholder mode with a warning.
+
+**Use Cases:**
+- Framework development and testing
+- CI/CD pipeline testing without API dependencies
+- Demonstrating MATRIX capabilities without live accounts
 
 ## Logs
 

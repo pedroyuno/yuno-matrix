@@ -124,21 +124,21 @@ class CertificationLogger:
             "duration_ms": duration_ms
         }
 
-        # Add request details (with masking)
+        # Add request details (no masking - sandbox mode)
         if request:
             log_entry["request"] = {
                 "method": request.method,
                 "url": request.url,
-                "headers": self._mask_sensitive_data(request.headers),
-                "body": self._mask_sensitive_data(request.body)
+                "headers": request.headers,
+                "body": request.body
             }
 
-        # Add response details (with masking)
+        # Add response details (no masking - sandbox mode)
         if response:
             log_entry["response"] = {
                 "status_code": response.status_code,
-                "headers": self._mask_sensitive_data(response.headers),
-                "body": self._mask_sensitive_data(response.body),
+                "headers": response.headers,
+                "body": response.body,
                 "error": response.error
             }
 

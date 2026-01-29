@@ -1,0 +1,241 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "test_suite_name": "Yuno Payment API Tests",
+    "merchant_id": "merchant_123",
+    "environment": "sandbox",
+    "created_at": "2026-01-29T10:00:00Z"
+  },
+  "test_cases": [
+    {
+      "id": "tc_yuno_001",
+      "name": "Yuno Direct Payment (Purchase)",
+      "description": "Test direct payment with capture in Yuno",
+      "steps": [
+        {
+          "step_id": 1,
+          "operation": "payment",
+          "provider": "safrapay",
+          "description": "Create Yuno payment with SafraPay",
+          "input_data": {
+            "description": "SafraPay Test Payment",
+            "merchant_order_id": "order_{{$uuid}}",
+            "country": "BR",
+            "amount": {
+              "currency": "BRL",
+              "value": 12
+            },
+            "additional_data": {
+              "order": {
+                "items": [
+                  {
+                    "id": "4421",
+                    "name": "Gummy Beauty",
+                    "quantity": 1,
+                    "unit_amount": 156.9,
+                    "category": "OTHERS",
+                    "sku_code": "10662"
+                  }
+                ],
+                "sales_channel": "008"
+              }
+            },
+            "customer_payer": {
+              "id": "23ab39e6-c745-4b5d-8678-bf14988f0e2a",
+              "email": "pepitoperez@y.uno",
+              "first_name": "Pepito",
+              "last_name": "Perez",
+              "document": {
+                "document_type": "CPF",
+                "document_number": "47033278802"
+              },
+              "billing_address": {
+                "address_line_1": "BA Address Line, 1",
+                "city": "Bogota",
+                "state": "Cundinamarca",
+                "zip_code": "123",
+                "country": "BR",
+                "neighborhood": "Camino Real"
+              },
+              "phone": {
+                "country_code": "55",
+                "number": "11123456789"
+              }
+            },
+            "payment_method": {
+              "type": "CARD",
+              "detail": {
+                "card": {
+                  "verify": false,
+                  "installments": 5,
+                  "capture": true,
+                  "card_data": {
+                    "number": "4444585001234562",
+                    "expiration_month": 12,
+                    "expiration_year": 27,
+                    "security_code": "123",
+                    "holder_name": "Julio Akio"
+                  }
+                }
+              }
+            },
+            "workflow": "DIRECT"
+          },
+          "capture_variables": {
+            "payment_id": "$.body.id",
+            "transaction_id": "$.body.transaction_id",
+            "payment_status": "$.body.status"
+          },
+          "expected_status": "success"
+        }
+      ]
+    },
+    {
+      "id": "tc_yuno_002",
+      "name": "Yuno Authorize and Capture Flow",
+      "description": "Test two-step authorization and capture with Yuno",
+      "steps": [
+        {
+          "step_id": 1,
+          "operation": "authorize",
+          "provider": "safrapay",
+          "description": "Authorize payment with SafraPay",
+          "input_data": {
+            "description": "SafraPay Authorization Test",
+            "merchant_order_id": "order_{{$uuid}}",
+            "country": "BR",
+            "amount": {
+              "currency": "BRL",
+              "value": 50
+            },
+            "customer_payer": {
+              "email": "testuser@y.uno",
+              "first_name": "Test",
+              "last_name": "User",
+              "document": {
+                "document_type": "CPF",
+                "document_number": "47033278802"
+              },
+              "billing_address": {
+                "address_line_1": "Test Address, 123",
+                "city": "São Paulo",
+                "state": "SP",
+                "zip_code": "01234-567",
+                "country": "BR"
+              },
+              "phone": {
+                "country_code": "55",
+                "number": "11987654321"
+              }
+            },
+            "payment_method": {
+              "type": "CARD",
+              "detail": {
+                "card": {
+                  "verify": false,
+                  "installments": 1,
+                  "capture": false,
+                  "card_data": {
+                    "number": "4444585001234562",
+                    "expiration_month": 12,
+                    "expiration_year": 27,
+                    "security_code": "123",
+                    "holder_name": "Test User"
+                  }
+                }
+              }
+            },
+            "workflow": "DIRECT"
+          },
+          "capture_variables": {
+            "payment_id": "$.body.id",
+            "auth_transaction_id": "$.body.transaction_id"
+          },
+          "expected_status": "success"
+        },
+        {
+          "step_id": 2,
+          "operation": "capture",
+          "provider": "safrapay",
+          "description": "Capture authorized payment",
+          "input_data": {
+            "payment_id": "{{payment_id}}",
+            "amount": {
+              "currency": "BRL",
+              "value": 50
+            }
+          },
+          "expected_status": "success"
+        }
+      ]
+    },
+    {
+      "id": "tc_yuno_003",
+      "name": "Yuno Payment with Refund",
+      "description": "Test payment followed by full refund",
+      "steps": [
+        {
+          "step_id": 1,
+          "operation": "payment",
+          "provider": "safrapay",
+          "description": "Create payment to be refunded",
+          "input_data": {
+            "description": "Payment for Refund Test",
+            "merchant_order_id": "order_{{$uuid}}",
+            "country": "BR",
+            "amount": {
+              "currency": "BRL",
+              "value": 100
+            },
+            "customer_payer": {
+              "email": "refundtest@y.uno",
+              "first_name": "Refund",
+              "last_name": "Test",
+              "document": {
+                "document_type": "CPF",
+                "document_number": "47033278802"
+              }
+            },
+            "payment_method": {
+              "type": "CARD",
+              "detail": {
+                "card": {
+                  "verify": false,
+                  "installments": 1,
+                  "capture": true,
+                  "card_data": {
+                    "number": "4444585001234562",
+                    "expiration_month": 12,
+                    "expiration_year": 27,
+                    "security_code": "123",
+                    "holder_name": "Refund Test"
+                  }
+                }
+              }
+            },
+            "workflow": "DIRECT"
+          },
+          "capture_variables": {
+            "payment_id": "$.body.id",
+            "transaction_id": "$.body.transaction_id"
+          },
+          "expected_status": "success"
+        },
+        {
+          "step_id": 2,
+          "operation": "refund",
+          "provider": "safrapay",
+          "description": "Refund the payment",
+          "input_data": {
+            "payment_id": "{{payment_id}}",
+            "amount": {
+              "currency": "BRL",
+              "value": 100
+            }
+          },
+          "expected_status": "success"
+        }
+      ]
+    }
+  ]
+}

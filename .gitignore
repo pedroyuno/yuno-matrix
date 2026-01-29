@@ -55,3 +55,12 @@ Thumbs.db
 
 # Project specific
 *.log
+
+# Environment variables (credentials)
+.env
+.env.local
+
+# Local test files (personal test cases with real data)
+local_*.json
+local_*.yaml
+local_tests/

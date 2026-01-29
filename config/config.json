@@ -1,5 +1,11 @@
 {
   "api": {
+    "yuno": {
+      "sandbox_url": "https://api-sandbox.y.uno/v1",
+      "production_url": "https://api.y.uno/v1",
+      "timeout": 30,
+      "retry_attempts": 3
+    },
     "base_urls": {
       "provider_a": "https://api.provider-a.com",
       "provider_b": "https://api.provider-b.com"
@@ -7,5 +13,47 @@
     "timeout": 30,
     "retry_attempts": 3
   },
-  "placeholder_mode": true
+  "placeholder_mode": false,
+  "default_payment_data": {
+    "description": "MATRIX Test Payment",
+    "country": "BR",
+    "workflow": "DIRECT",
+    "customer_payer": {
+      "email": "pepitoperez@y.uno",
+      "first_name": "Pepito",
+      "last_name": "Perez",
+      "document": {
+        "document_type": "cpf",
+        "document_number": "47033278802"
+      },
+      "billing_address": {
+        "address_line_1": "BA Address Line, 1",
+        "city": "Bogota",
+        "state": "Cundinamarca",
+        "zip_code": "123",
+        "country": "BR",
+        "neighborhood": "Camino Real"
+      },
+      "phone": {
+        "country_code": "55",
+        "number": "11123456789"
+      }
+    },
+    "payment_method": {
+      "type": "CARD",
+      "detail": {
+        "card": {
+          "verify": false,
+          "installments": 1,
+          "card_data": {
+            "number": "4444585001234562",
+            "expiration_month": 12,
+            "expiration_year": 27,
+            "security_code": "123",
+            "holder_name": "Julio Akio"
+          }
+        }
+      }
+    }
+  }
 }
