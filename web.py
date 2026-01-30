@@ -156,10 +156,62 @@ HTML_TEMPLATE = """
             padding: 16px;
             cursor: pointer;
             user-select: none;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
         }
         
         .test-case-summary:hover {
             background: rgba(0,0,0,0.02);
+        }
+        
+        .test-case-checkbox {
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        
+        .test-case-checkbox input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #4f46e5;
+        }
+        
+        .test-case-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .selection-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: #f9fafb;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .selection-controls label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: #4f46e5;
+            font-weight: 500;
+        }
+        
+        .selection-controls input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #4f46e5;
+        }
+        
+        .selection-count {
+            color: #666;
+            margin-left: auto;
         }
         
         .test-case-header {
@@ -653,9 +705,16 @@ HTML_TEMPLATE = """
                 <span id="status-text">Running tests...</span>
             </div>
             <div id="summary" class="summary-card hidden"></div>
+            <div id="selection-controls" class="selection-controls">
+                <label>
+                    <input type="checkbox" id="select-all" checked onchange="toggleSelectAll()">
+                    Select All
+                </label>
+                <span class="selection-count" id="selection-count"></span>
+            </div>
             <div id="testcases-list"></div>
             <div class="actions" id="actions">
-                <button class="btn btn-primary" id="run-btn">Run All Tests</button>
+                <button class="btn btn-primary" id="run-btn">Run Selected Tests</button>
                 <button class="btn btn-secondary" id="clear-btn">Clear</button>
             </div>
             <div class="actions hidden" id="post-actions">
@@ -685,6 +744,7 @@ HTML_TEMPLATE = """
         let currentExecutionId = null;
         let testResults = {};
         let summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
+        let selectedTestCases = new Set();
         
         // File upload handling
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -732,7 +792,10 @@ HTML_TEMPLATE = """
                 
                 currentSuiteId = data.suite_id;
                 currentSuite = data.test_suite;
+                // Select all test cases by default
+                selectedTestCases = new Set(data.test_suite.test_cases.map(tc => tc.id));
                 displayTestSuite(data.test_suite);
+                updateSelectionCount();
                 
             } catch (error) {
                 uploadError.textContent = 'Failed to upload file: ' + error.message;
@@ -873,21 +936,31 @@ HTML_TEMPLATE = """
                     `;
                 }).join('');
                 
+                const isSelected = selectedTestCases.has(tc.id);
+                
                 return `
                     <div class="test-case ${statusClass}" id="tc-${tc.id}">
-                        <div class="test-case-summary" onclick="toggleTestCase('${tc.id}')">
-                            <div class="test-case-header">
-                                <span class="test-case-name">
-                                    ${statusIcon ? `<span class="status-icon">${statusIcon}</span>` : ''}
-                                    ${tc.name}
-                                </span>
-                                ${durationHtml}
-                                <span class="test-case-id">${tc.id}</span>
+                        <div class="test-case-summary">
+                            <div class="test-case-checkbox" onclick="event.stopPropagation()">
+                                <input type="checkbox" 
+                                       id="cb-${tc.id}" 
+                                       ${isSelected ? 'checked' : ''} 
+                                       onchange="toggleTestCaseSelection('${tc.id}')">
                             </div>
-                            <div class="test-case-desc">${tc.description}</div>
-                            <div class="steps-info">
-                                <span class="expand-icon">▶</span>
-                                ${tc.steps.length} step${tc.steps.length !== 1 ? 's' : ''}: ${tc.steps.map(s => s.operation).join(' → ')}
+                            <div class="test-case-content" onclick="toggleTestCase('${tc.id}')">
+                                <div class="test-case-header">
+                                    <span class="test-case-name">
+                                        ${statusIcon ? `<span class="status-icon">${statusIcon}</span>` : ''}
+                                        ${tc.name}
+                                    </span>
+                                    ${durationHtml}
+                                    <span class="test-case-id">${tc.id}</span>
+                                </div>
+                                <div class="test-case-desc">${tc.description}</div>
+                                <div class="steps-info">
+                                    <span class="expand-icon">▶</span>
+                                    ${tc.steps.length} step${tc.steps.length !== 1 ? 's' : ''}: ${tc.steps.map(s => s.operation).join(' → ')}
+                                </div>
                             </div>
                         </div>
                         <div class="test-case-details">
@@ -908,6 +981,56 @@ HTML_TEMPLATE = """
             if (element) {
                 element.classList.toggle('expanded');
             }
+        }
+        
+        function toggleTestCaseSelection(tcId) {
+            if (selectedTestCases.has(tcId)) {
+                selectedTestCases.delete(tcId);
+            } else {
+                selectedTestCases.add(tcId);
+            }
+            updateSelectionCount();
+            updateSelectAllCheckbox();
+        }
+        
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('select-all');
+            if (selectAllCheckbox.checked) {
+                // Select all
+                currentSuite.test_cases.forEach(tc => selectedTestCases.add(tc.id));
+            } else {
+                // Deselect all
+                selectedTestCases.clear();
+            }
+            // Update individual checkboxes
+            currentSuite.test_cases.forEach(tc => {
+                const cb = document.getElementById(`cb-${tc.id}`);
+                if (cb) cb.checked = selectAllCheckbox.checked;
+            });
+            updateSelectionCount();
+        }
+        
+        function updateSelectAllCheckbox() {
+            const selectAllCheckbox = document.getElementById('select-all');
+            if (currentSuite) {
+                const allSelected = currentSuite.test_cases.every(tc => selectedTestCases.has(tc.id));
+                const someSelected = currentSuite.test_cases.some(tc => selectedTestCases.has(tc.id));
+                selectAllCheckbox.checked = allSelected;
+                selectAllCheckbox.indeterminate = someSelected && !allSelected;
+            }
+        }
+        
+        function updateSelectionCount() {
+            const countEl = document.getElementById('selection-count');
+            if (countEl && currentSuite) {
+                const total = currentSuite.test_cases.length;
+                const selected = selectedTestCases.size;
+                countEl.textContent = `${selected} of ${total} selected`;
+            }
+        }
+        
+        function getSelectedTestCaseIds() {
+            return Array.from(selectedTestCases);
         }
         
         function updateSummary() {
@@ -1124,9 +1247,19 @@ HTML_TEMPLATE = """
         document.getElementById('run-btn').addEventListener('click', async () => {
             if (!currentSuiteId) return;
             
+            // Check if any test cases are selected
+            const selectedIds = getSelectedTestCaseIds();
+            if (selectedIds.length === 0) {
+                uploadError.textContent = 'Please select at least one test case to execute.';
+                uploadError.classList.remove('hidden');
+                return;
+            }
+            
+            uploadError.classList.add('hidden');
+            
             // Reset state
             testResults = {};
-            summary = { total: currentSuite.test_cases.length, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
+            summary = { total: selectedIds.length, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
             
             // Show execution status
             executionStatus.classList.remove('hidden');
@@ -1137,15 +1270,17 @@ HTML_TEMPLATE = """
             // Reset test case displays
             displayTestSuite(currentSuite);
             
-            // Start SSE connection
-            const eventSource = new EventSource(`/execute-stream?suite_id=${currentSuiteId}`);
+            // Start SSE connection with selected test case IDs
+            const idsParam = encodeURIComponent(selectedIds.join(','));
+            const eventSource = new EventSource(`/execute-stream?suite_id=${currentSuiteId}&test_case_ids=${idsParam}`);
             
             eventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'start') {
                     currentExecutionId = data.execution_id;
-                    statusText.textContent = `Running ${summary.total} test cases...`;
+                    summary.total = data.total;
+                    statusText.textContent = `Running ${data.total} test case${data.total !== 1 ? 's' : ''}...`;
                     updateSummary();
                 }
                 else if (data.type === 'test_case_start') {
@@ -1409,6 +1544,7 @@ def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
 def execute_stream():
     """Execute test suite with SSE streaming."""
     suite_id = request.args.get('suite_id')
+    test_case_ids_param = request.args.get('test_case_ids', '')
     
     if not suite_id or suite_id not in uploaded_suites:
         def error_stream():
@@ -1416,6 +1552,13 @@ def execute_stream():
         return Response(error_stream(), mimetype='text/event-stream')
     
     test_suite = uploaded_suites[suite_id]
+    
+    # Filter test cases if specific IDs are provided
+    if test_case_ids_param:
+        selected_ids = set(test_case_ids_param.split(','))
+        test_cases_to_run = [tc for tc in test_suite.test_cases if tc.id in selected_ids]
+    else:
+        test_cases_to_run = test_suite.test_cases
     
     def generate():
         try:
@@ -1431,10 +1574,10 @@ def execute_stream():
             context = ExecutionContext()
             
             # Send start event
-            yield f"data: {json.dumps({'type': 'start', 'execution_id': execution_id, 'total': len(test_suite.test_cases)})}\n\n"
+            yield f"data: {json.dumps({'type': 'start', 'execution_id': execution_id, 'total': len(test_cases_to_run)})}\n\n"
             
-            # Execute each test case
-            for test_case in test_suite.test_cases:
+            # Execute each selected test case
+            for test_case in test_cases_to_run:
                 context.clear()
                 
                 # Send test case start event
