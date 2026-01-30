@@ -127,9 +127,9 @@ HTML_TEMPLATE = """
         .test-case {
             border: 1px solid #e5e7eb;
             border-radius: 8px;
-            padding: 16px;
             margin-bottom: 12px;
             transition: all 0.3s;
+            overflow: hidden;
         }
         
         .test-case.running {
@@ -150,6 +150,16 @@ HTML_TEMPLATE = """
         .test-case.error {
             border-color: #f59e0b;
             background: #fef3c7;
+        }
+        
+        .test-case-summary {
+            padding: 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .test-case-summary:hover {
+            background: rgba(0,0,0,0.02);
         }
         
         .test-case-header {
@@ -182,6 +192,19 @@ HTML_TEMPLATE = """
         .steps-info {
             font-size: 0.85rem;
             color: #888;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .expand-icon {
+            transition: transform 0.2s;
+            font-size: 0.75rem;
+            color: #888;
+        }
+        
+        .test-case.expanded .expand-icon {
+            transform: rotate(90deg);
         }
         
         .test-case-duration {
@@ -193,6 +216,249 @@ HTML_TEMPLATE = """
         
         .status-icon {
             font-size: 1.1rem;
+        }
+        
+        .test-case-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            background: rgba(0,0,0,0.02);
+            border-top: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .test-case.expanded .test-case-details {
+            max-height: 2000px;
+        }
+        
+        .test-case-details-inner {
+            padding: 16px;
+        }
+        
+        .step-detail {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        
+        .step-detail:last-child {
+            margin-bottom: 0;
+        }
+        
+        .step-detail-header {
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .step-number {
+            background: #4f46e5;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .step-detail.success .step-number { background: #059669; }
+        .step-detail.failure .step-number { background: #dc2626; }
+        .step-detail.error .step-number { background: #d97706; }
+        
+        .step-operation {
+            background: #e5e7eb;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-family: monospace;
+            color: #4f46e5;
+        }
+        
+        .step-provider {
+            font-size: 0.8rem;
+            color: #888;
+            margin-left: auto;
+        }
+        
+        .step-detail-body {
+            padding: 12px;
+            font-size: 0.85rem;
+        }
+        
+        .step-description {
+            color: #666;
+            margin-bottom: 12px;
+        }
+        
+        .step-section {
+            margin-bottom: 12px;
+        }
+        
+        .step-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .step-section-label {
+            font-size: 0.75rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        
+        .step-data {
+            background: #1a1a2e;
+            color: #a5f3fc;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .collapsible-section {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #f9fafb;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #4f46e5;
+        }
+        
+        .collapsible-header:hover {
+            background: #f3f4f6;
+        }
+        
+        .collapsible-header .collapse-icon {
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+        
+        .collapsible-section.open .collapse-icon {
+            transform: rotate(90deg);
+        }
+        
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        
+        .collapsible-section.open .collapsible-content {
+            max-height: 500px;
+        }
+        
+        .collapsible-content .step-data {
+            border-radius: 0;
+            margin: 0;
+        }
+        
+        .step-result-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .step-result-badge.success {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .step-result-badge.failure {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .step-result-badge.error {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .step-error-msg {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+        
+        .capture-vars {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .capture-var {
+            background: #e0e7ff;
+            color: #4338ca;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+        
+        .capture-var.captured {
+            background: #d1fae5;
+            color: #059669;
+            border: 1px solid #10b981;
+        }
+        
+        .response-status-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .response-status-badge {
+            background: #1a1a2e;
+            color: #a5f3fc;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: monospace;
+        }
+        
+        .response-substatus-badge {
+            background: #fef3c7;
+            color: #92400e;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            font-family: monospace;
+        }
+        
+        .http-status-code {
+            color: #888;
+            font-size: 0.8rem;
+            font-family: monospace;
         }
         
         .btn {
@@ -256,10 +522,16 @@ HTML_TEMPLATE = """
         
         .summary-card {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 12px;
             text-align: center;
             margin-bottom: 24px;
+        }
+        
+        @media (max-width: 768px) {
+            .summary-card {
+                grid-template-columns: repeat(3, 1fr);
+            }
         }
         
         .summary-item {
@@ -283,6 +555,8 @@ HTML_TEMPLATE = """
         .summary-item.passed .summary-value { color: #059669; }
         .summary-item.failed .summary-value { color: #dc2626; }
         .summary-item.errors .summary-value { color: #d97706; }
+        .summary-item.approved .summary-value { color: #0891b2; }
+        .summary-item.declined .summary-value { color: #be185d; }
         
         .spinner-small {
             display: inline-block;
@@ -410,7 +684,7 @@ HTML_TEMPLATE = """
         let currentSuite = null;
         let currentExecutionId = null;
         let testResults = {};
-        let summary = { total: 0, passed: 0, failed: 0, errors: 0 };
+        let summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
         
         // File upload handling
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -489,7 +763,6 @@ HTML_TEMPLATE = """
                 let statusClass = '';
                 let statusIcon = '';
                 let durationHtml = '';
-                let stepsHtml = '';
                 
                 if (result) {
                     statusClass = result.status === 'pass' ? 'passed' : 
@@ -497,36 +770,131 @@ HTML_TEMPLATE = """
                     statusIcon = result.status === 'pass' ? '✓' : 
                                 result.status === 'fail' ? '✗' : '⚠';
                     durationHtml = `<span class="test-case-duration">${result.duration_ms}ms</span>`;
+                }
+                
+                // Build step details HTML
+                const stepsDetailsHtml = tc.steps.map((step, idx) => {
+                    const stepResult = result?.steps?.find(s => s.step_id === step.step_id);
+                    const stepStatusClass = stepResult ? stepResult.status : '';
+                    const stepResultBadge = stepResult ? `
+                        <span class="step-result-badge ${stepResult.status}">${stepResult.status.toUpperCase()}</span>
+                        ${stepResult.duration_ms ? `<span style="color:#888;font-size:0.8rem;margin-left:8px">${stepResult.duration_ms}ms</span>` : ''}
+                    ` : '';
                     
-                    if (result.steps && result.steps.length > 0) {
-                        stepsHtml = `<div class="step-list">
-                            ${result.steps.map(step => {
-                                const stepClass = step.status === 'success' ? 'step-success' :
-                                                 step.status === 'failure' ? 'step-failure' : 'step-error';
-                                const stepIcon = step.status === 'success' ? '✓' :
-                                                step.status === 'failure' ? '✗' : '⚠';
-                                return `<div class="step-item ${stepClass}">
-                                    ${stepIcon} Step ${step.step_id}: ${step.operation}
-                                    ${step.error_message ? `<small style="color:#dc2626"> - ${step.error_message}</small>` : ''}
-                                </div>`;
-                            }).join('')}
+                    // Build response status section
+                    const responseStatusHtml = stepResult?.response_status ? `
+                        <div class="step-section">
+                            <div class="step-section-label">API Response</div>
+                            <div class="response-status-row">
+                                <span class="response-status-badge">${stepResult.response_status}</span>
+                                ${stepResult.response_substatus ? `<span class="response-substatus-badge">${stepResult.response_substatus}</span>` : ''}
+                                ${stepResult.http_status_code ? `<span class="http-status-code">HTTP ${stepResult.http_status_code}</span>` : ''}
+                            </div>
+                        </div>
+                    ` : '';
+                    
+                    const requestHtml = step.input_data && Object.keys(step.input_data).length > 0 
+                        ? `<div class="step-section">
+                            <div class="collapsible-section" onclick="this.classList.toggle('open')">
+                                <div class="collapsible-header">
+                                    <span class="collapse-icon">▶</span>
+                                    Request
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="step-data">${JSON.stringify(step.input_data, null, 2)}</div>
+                                </div>
+                            </div>
+                           </div>` 
+                        : '';
+                    
+                    const responseHtml = stepResult?.response_body 
+                        ? `<div class="step-section">
+                            <div class="collapsible-section" onclick="this.classList.toggle('open')">
+                                <div class="collapsible-header">
+                                    <span class="collapse-icon">▶</span>
+                                    Response
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="step-data">${JSON.stringify(stepResult.response_body, null, 2)}</div>
+                                </div>
+                            </div>
+                           </div>` 
+                        : '';
+                    
+                    // Show captured values if we have results, otherwise show the JSONPath specs
+                    let captureVarsHtml = '';
+                    if (stepResult?.captured_variables && Object.keys(stepResult.captured_variables).length > 0) {
+                        // Show actual captured values after execution
+                        captureVarsHtml = `<div class="step-section">
+                            <div class="step-section-label">Captured Values</div>
+                            <div class="capture-vars">
+                                ${Object.entries(stepResult.captured_variables).map(([name, value]) => 
+                                    `<span class="capture-var captured">${name} = ${JSON.stringify(value)}</span>`
+                                ).join('')}
+                            </div>
+                        </div>`;
+                    } else if (step.capture_variables && Object.keys(step.capture_variables).length > 0) {
+                        // Show JSONPath specs before execution
+                        captureVarsHtml = `<div class="step-section">
+                            <div class="step-section-label">Variables to Capture</div>
+                            <div class="capture-vars">
+                                ${Object.entries(step.capture_variables).map(([name, path]) => 
+                                    `<span class="capture-var">${name} ← ${path}</span>`
+                                ).join('')}
+                            </div>
                         </div>`;
                     }
-                }
+                    
+                    const errorHtml = stepResult?.error_message 
+                        ? `<div class="step-error-msg">${stepResult.error_message}</div>` 
+                        : '';
+                    
+                    return `
+                        <div class="step-detail ${stepStatusClass}">
+                            <div class="step-detail-header">
+                                <span class="step-number">${step.step_id}</span>
+                                <span class="step-operation">${step.operation}</span>
+                                <span style="color:#1a1a2e">${step.description}</span>
+                                <span class="step-provider">${step.provider}</span>
+                                ${stepResultBadge}
+                            </div>
+                            <div class="step-detail-body">
+                                ${requestHtml}
+                                ${responseStatusHtml}
+                                ${responseHtml}
+                                ${captureVarsHtml}
+                                ${step.expected_status ? `<div class="step-section">
+                                    <div class="step-section-label">Expected Status</div>
+                                    <span style="color:#059669;font-weight:500">${step.expected_status}</span>
+                                </div>` : ''}
+                                ${errorHtml}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
                 
                 return `
                     <div class="test-case ${statusClass}" id="tc-${tc.id}">
-                        <div class="test-case-header">
-                            <span class="test-case-name">
-                                ${statusIcon ? `<span class="status-icon">${statusIcon}</span>` : ''}
-                                ${tc.name}
-                            </span>
-                            ${durationHtml}
-                            <span class="test-case-id">${tc.id}</span>
+                        <div class="test-case-summary" onclick="toggleTestCase('${tc.id}')">
+                            <div class="test-case-header">
+                                <span class="test-case-name">
+                                    ${statusIcon ? `<span class="status-icon">${statusIcon}</span>` : ''}
+                                    ${tc.name}
+                                </span>
+                                ${durationHtml}
+                                <span class="test-case-id">${tc.id}</span>
+                            </div>
+                            <div class="test-case-desc">${tc.description}</div>
+                            <div class="steps-info">
+                                <span class="expand-icon">▶</span>
+                                ${tc.steps.length} step${tc.steps.length !== 1 ? 's' : ''}: ${tc.steps.map(s => s.operation).join(' → ')}
+                            </div>
                         </div>
-                        <div class="test-case-desc">${tc.description}</div>
-                        <div class="steps-info">${tc.steps.length} step${tc.steps.length !== 1 ? 's' : ''}: ${tc.steps.map(s => s.operation).join(' → ')}</div>
-                        ${stepsHtml}
+                        <div class="test-case-details">
+                            <div class="test-case-details-inner">
+                                ${stepsDetailsHtml}
+                            </div>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -535,11 +903,18 @@ HTML_TEMPLATE = """
             uploadSection.classList.add('hidden');
         }
         
+        function toggleTestCase(tcId) {
+            const element = document.getElementById(`tc-${tcId}`);
+            if (element) {
+                element.classList.toggle('expanded');
+            }
+        }
+        
         function updateSummary() {
             summaryDiv.innerHTML = `
                 <div class="summary-item">
                     <div class="summary-value">${summary.total}</div>
-                    <div class="summary-label">Total</div>
+                    <div class="summary-label">Test Cases</div>
                 </div>
                 <div class="summary-item passed">
                     <div class="summary-value">${summary.passed}</div>
@@ -552,6 +927,14 @@ HTML_TEMPLATE = """
                 <div class="summary-item errors">
                     <div class="summary-value">${summary.errors}</div>
                     <div class="summary-label">Errors</div>
+                </div>
+                <div class="summary-item approved">
+                    <div class="summary-value">${summary.approved}</div>
+                    <div class="summary-label">Approved</div>
+                </div>
+                <div class="summary-item declined">
+                    <div class="summary-value">${summary.declined}</div>
+                    <div class="summary-label">Declined</div>
                 </div>
             `;
             summaryDiv.classList.remove('hidden');
@@ -593,24 +976,129 @@ HTML_TEMPLATE = """
                 durationEl.textContent = `${tc.duration_ms}ms`;
             }
             
-            // Add steps
+            // Update step details with results
             if (tc.steps && tc.steps.length > 0) {
-                let stepList = element.querySelector('.step-list');
-                if (!stepList) {
-                    stepList = document.createElement('div');
-                    stepList.className = 'step-list';
-                    element.appendChild(stepList);
-                }
-                stepList.innerHTML = tc.steps.map(step => {
-                    const stepClass = step.status === 'success' ? 'step-success' :
-                                     step.status === 'failure' ? 'step-failure' : 'step-error';
-                    const stepIcon = step.status === 'success' ? '✓' :
-                                    step.status === 'failure' ? '✗' : '⚠';
-                    return `<div class="step-item ${stepClass}">
-                        ${stepIcon} Step ${step.step_id}: ${step.operation}
-                        ${step.error_message ? `<small style="color:#dc2626"> - ${step.error_message}</small>` : ''}
-                    </div>`;
-                }).join('');
+                const stepDetails = element.querySelectorAll('.step-detail');
+                tc.steps.forEach(stepResult => {
+                    const stepEl = stepDetails[stepResult.step_id - 1];
+                    if (stepEl) {
+                        stepEl.classList.remove('success', 'failure', 'error');
+                        stepEl.classList.add(stepResult.status);
+                        
+                        // Add result badge to header
+                        const headerEl = stepEl.querySelector('.step-detail-header');
+                        let badge = headerEl.querySelector('.step-result-badge');
+                        if (!badge) {
+                            headerEl.insertAdjacentHTML('beforeend', `
+                                <span class="step-result-badge ${stepResult.status}">${stepResult.status.toUpperCase()}</span>
+                                ${stepResult.duration_ms ? `<span style="color:#888;font-size:0.8rem;margin-left:8px">${stepResult.duration_ms}ms</span>` : ''}
+                            `);
+                        }
+                        
+                        // Add response status and body sections
+                        if (stepResult.response_status || stepResult.response_body) {
+                            const bodyEl = stepEl.querySelector('.step-detail-body');
+                            
+                            // Add response status row if not present
+                            if (stepResult.response_status && !bodyEl.querySelector('.response-status-row')) {
+                                const statusHtml = `
+                                    <div class="step-section response-status-section">
+                                        <div class="step-section-label">API Response</div>
+                                        <div class="response-status-row">
+                                            <span class="response-status-badge">${stepResult.response_status}</span>
+                                            ${stepResult.response_substatus ? `<span class="response-substatus-badge">${stepResult.response_substatus}</span>` : ''}
+                                            ${stepResult.http_status_code ? `<span class="http-status-code">HTTP ${stepResult.http_status_code}</span>` : ''}
+                                        </div>
+                                    </div>
+                                `;
+                                const requestSection = bodyEl.querySelector('.collapsible-section');
+                                if (requestSection) {
+                                    requestSection.closest('.step-section').insertAdjacentHTML('afterend', statusHtml);
+                                } else {
+                                    bodyEl.insertAdjacentHTML('afterbegin', statusHtml);
+                                }
+                            }
+                            
+                            // Add collapsible response body if not present
+                            if (stepResult.response_body && !bodyEl.querySelector('.response-body-section')) {
+                                const responseBodyHtml = `
+                                    <div class="step-section response-body-section">
+                                        <div class="collapsible-section" onclick="this.classList.toggle('open')">
+                                            <div class="collapsible-header">
+                                                <span class="collapse-icon">▶</span>
+                                                Response
+                                            </div>
+                                            <div class="collapsible-content">
+                                                <div class="step-data">${JSON.stringify(stepResult.response_body, null, 2)}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                                const statusSection = bodyEl.querySelector('.response-status-section');
+                                if (statusSection) {
+                                    statusSection.insertAdjacentHTML('afterend', responseBodyHtml);
+                                } else {
+                                    const requestSection = bodyEl.querySelector('.collapsible-section');
+                                    if (requestSection) {
+                                        requestSection.closest('.step-section').insertAdjacentHTML('afterend', responseBodyHtml);
+                                    } else {
+                                        bodyEl.insertAdjacentHTML('afterbegin', responseBodyHtml);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Update captured variables section with actual values
+                        if (stepResult.captured_variables && Object.keys(stepResult.captured_variables).length > 0) {
+                            const bodyEl = stepEl.querySelector('.step-detail-body');
+                            // Find existing capture vars section or create new one
+                            let captureSection = bodyEl.querySelector('.step-section:has(.capture-vars)');
+                            if (!captureSection) {
+                                // Find the section by label text as fallback
+                                const sections = bodyEl.querySelectorAll('.step-section');
+                                sections.forEach(s => {
+                                    const label = s.querySelector('.step-section-label');
+                                    if (label && (label.textContent.includes('Capture') || label.textContent.includes('Variables'))) {
+                                        captureSection = s;
+                                    }
+                                });
+                            }
+                            
+                            const capturedHtml = `
+                                <div class="step-section">
+                                    <div class="step-section-label">Captured Values</div>
+                                    <div class="capture-vars">
+                                        ${Object.entries(stepResult.captured_variables).map(([name, value]) => 
+                                            `<span class="capture-var captured">${name} = ${JSON.stringify(value)}</span>`
+                                        ).join('')}
+                                    </div>
+                                </div>
+                            `;
+                            
+                            if (captureSection) {
+                                captureSection.outerHTML = capturedHtml;
+                            } else {
+                                // Insert before expected status or at end
+                                const expectedSection = bodyEl.querySelector('.step-section:last-child');
+                                if (expectedSection) {
+                                    expectedSection.insertAdjacentHTML('beforebegin', capturedHtml);
+                                } else {
+                                    bodyEl.insertAdjacentHTML('beforeend', capturedHtml);
+                                }
+                            }
+                        }
+                        
+                        // Add error message if present
+                        if (stepResult.error_message) {
+                            const bodyEl = stepEl.querySelector('.step-detail-body');
+                            if (!bodyEl.querySelector('.step-error-msg')) {
+                                bodyEl.insertAdjacentHTML('beforeend', `
+                                    <div class="step-error-msg">${stepResult.error_message}</div>
+                                `);
+                            }
+                        }
+                    }
+                });
             }
         }
         
@@ -638,7 +1126,7 @@ HTML_TEMPLATE = """
             
             // Reset state
             testResults = {};
-            summary = { total: currentSuite.test_cases.length, passed: 0, failed: 0, errors: 0 };
+            summary = { total: currentSuite.test_cases.length, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
             
             // Show execution status
             executionStatus.classList.remove('hidden');
@@ -668,10 +1156,24 @@ HTML_TEMPLATE = """
                     const tc = data.result;
                     testResults[tc.test_case_id] = tc;
                     
-                    // Update summary
+                    // Update test case summary
                     if (tc.status === 'pass') summary.passed++;
                     else if (tc.status === 'fail') summary.failed++;
                     else summary.errors++;
+                    
+                    // Count approved/declined transactions from step responses
+                    if (tc.steps) {
+                        tc.steps.forEach(step => {
+                            if (step.response_status) {
+                                const status = step.response_status.toUpperCase();
+                                if (status === 'SUCCEEDED' || status === 'APPROVED' || status === 'CAPTURED') {
+                                    summary.approved++;
+                                } else if (status === 'DECLINED' || status === 'REJECTED' || status === 'FAILED') {
+                                    summary.declined++;
+                                }
+                            }
+                        });
+                    }
                     
                     updateSummary();
                     updateTestCaseUI(tc);
@@ -716,7 +1218,7 @@ HTML_TEMPLATE = """
         
         document.getElementById('run-again-btn').addEventListener('click', () => {
             testResults = {};
-            summary = { total: 0, passed: 0, failed: 0, errors: 0 };
+            summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
             postActions.classList.add('hidden');
             actions.classList.remove('hidden');
             summaryDiv.classList.add('hidden');
@@ -782,7 +1284,11 @@ def upload_file():
                             {
                                 'step_id': s.step_id,
                                 'operation': s.operation,
-                                'description': s.description
+                                'provider': s.provider,
+                                'description': s.description,
+                                'input_data': s.input_data,
+                                'capture_variables': s.capture_variables,
+                                'expected_status': s.expected_status
                             }
                             for s in tc.steps
                         ]
@@ -952,7 +1458,12 @@ def execute_stream():
                                 'operation': s.operation,
                                 'status': s.status,
                                 'duration_ms': s.duration_ms,
-                                'error_message': s.error_message
+                                'error_message': s.error_message,
+                                'captured_variables': s.captured_variables,
+                                'response_status': s.response.body.get('status') if s.response and s.response.body else None,
+                                'response_substatus': s.response.body.get('sub_status') if s.response and s.response.body else None,
+                                'http_status_code': s.response.status_code if s.response else None,
+                                'response_body': s.response.body if s.response else None
                             }
                             for s in result.steps
                         ]

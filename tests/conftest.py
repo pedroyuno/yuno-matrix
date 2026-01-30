@@ -34,11 +34,11 @@ def sample_step_authorize() -> Step:
         input_data={
             "amount": 100.00,
             "currency": "USD",
-            "card_token": "{{card_token}}"
+            "card_token": "tok_test_visa_4111"
         },
         capture_variables={
-            "transaction_id": "$.response.transaction_id",
-            "auth_code": "$.response.auth_code"
+            "transaction_id": "$.body.transaction_id",
+            "auth_code": "$.body.auth_code"
         },
         expected_status="success"
     )
