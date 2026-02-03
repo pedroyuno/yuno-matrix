@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, send_file, Response
 
-from src.parser import TestCaseParser, TestCaseParseError
+from src.scoping_parser import ScopingParser, ScopingParseError
+from src.test_generator import TestCaseGenerator, GeneratorConfig
 from src.api_client import APIClient
 from src.logger import CertificationLogger
 from src.context import ExecutionContext, ContextError
@@ -124,6 +125,107 @@ HTML_TEMPLATE = """
         
         .upload-text strong {
             color: #4f46e5;
+        }
+        
+        /* Hierarchy Styles */
+        .hierarchy-group {
+            margin-bottom: 8px;
+        }
+        
+        .hierarchy-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            cursor: pointer;
+            user-select: none;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+        
+        .hierarchy-header:hover {
+            background: #f3f4f6;
+        }
+        
+        .payment-method-header {
+            background: #e0e7ff;
+            font-weight: 600;
+            font-size: 1.05rem;
+        }
+        
+        .payment-method-header:hover {
+            background: #c7d2fe;
+        }
+        
+        .provider-header {
+            background: #f3f4f6;
+            margin-left: 24px;
+            font-weight: 500;
+        }
+        
+        .provider-header:hover {
+            background: #e5e7eb;
+        }
+        
+        .hierarchy-checkbox {
+            flex-shrink: 0;
+        }
+        
+        .hierarchy-checkbox input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #4f46e5;
+        }
+        
+        .hierarchy-expand-icon {
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+            color: #666;
+        }
+        
+        .hierarchy-group.expanded > .hierarchy-header .hierarchy-expand-icon {
+            transform: rotate(90deg);
+        }
+        
+        .hierarchy-number {
+            color: #666;
+            font-weight: 500;
+            min-width: 40px;
+        }
+        
+        .hierarchy-name {
+            flex: 1;
+        }
+        
+        .hierarchy-count {
+            color: #888;
+            font-size: 0.85rem;
+            font-weight: normal;
+        }
+        
+        .hierarchy-children {
+            display: none;
+            padding-left: 24px;
+        }
+        
+        .hierarchy-group.expanded > .hierarchy-children {
+            display: block;
+        }
+        
+        .provider-group .hierarchy-children {
+            padding-left: 16px;
+        }
+        
+        .provider-group .test-case {
+            margin-left: 24px;
+        }
+        
+        .test-case-index {
+            color: #888;
+            font-size: 0.85rem;
+            margin-right: 8px;
+            min-width: 50px;
         }
         
         .test-case {
@@ -708,30 +810,59 @@ HTML_TEMPLATE = """
             </div>
             
             <!-- Saved Payload Notice -->
-            <div id="saved-payload-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
-                <span style="color: #059669;">You have a saved payment payload. It will be used for all selected providers.</span>
+            <div id="saved-payload-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #059669;">You have a saved payment payload. It will be used for all test cases.</span>
+                <button onclick="clearBuilderPayload()" style="background: none; border: 1px solid #10b981; color: #059669; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Clear</button>
             </div>
             
             <div style="text-align: center; color: #888; margin: 16px 0;">— or —</div>
             
-            <h3 style="font-size: 1rem; color: #666; margin-bottom: 12px;">Upload Test Suite File</h3>
+            <h3 style="font-size: 1rem; color: #666; margin-bottom: 12px;">Upload Scoping Document</h3>
             <div class="upload-area" id="upload-area">
-                <input type="file" id="file-input" accept=".json">
+                <input type="file" id="file-input" accept=".csv">
                 <div class="upload-icon">📄</div>
                 <p class="upload-text">
                     <strong>Click to upload</strong> or drag and drop<br>
-                    <small>JSON test case file</small>
+                    <small>CSV scoping document</small>
                 </p>
             </div>
             <div id="upload-error" class="error-message hidden"></div>
+            
+            <!-- CSV Options (shown when CSV is detected) -->
+            <div id="csv-options" class="hidden" style="margin-top: 16px; padding: 16px; background: #f9fafb; border-radius: 8px;">
+                <h4 style="font-size: 0.9rem; color: #666; margin-bottom: 12px;">Scoping Document Options</h4>
+                <p id="csv-filename" style="font-size: 0.85rem; color: #4f46e5; margin-bottom: 12px;"></p>
+                <div style="display: grid; gap: 12px;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="only-implemented" checked>
+                        <span>Only test implemented operations</span>
+                    </label>
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-size: 0.85rem; color: #666;">Merchant ID:</label>
+                        <input type="text" id="merchant-id" value="matrix_test" style="width: 100%; padding: 8px; border: 1px solid #d0d5dd; border-radius: 6px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-size: 0.85rem; color: #666;">Environment:</label>
+                        <select id="environment-select" style="width: 100%; padding: 8px; border: 1px solid #d0d5dd; border-radius: 6px;">
+                            <option value="sandbox" selected>Sandbox</option>
+                            <option value="production">Production</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                        <button class="btn btn-primary" id="csv-upload-btn" style="flex: 1;">Generate Test Cases</button>
+                        <button class="btn btn-secondary" id="csv-cancel-btn">Cancel</button>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Test Cases Section -->
         <div class="card hidden" id="testcases-section">
             <h2>Test Suite</h2>
             <div class="metadata" id="metadata"></div>
-            <div id="payload-active-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
-                <span style="color: #059669;">You have a saved payment payload. It will be used for all selected providers.</span>
+            <div id="payload-active-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #059669;">Using saved payment payload for all test cases.</span>
+                <button onclick="clearBuilderPayload(); document.getElementById('payload-active-notice').classList.add('hidden');" style="background: none; border: 1px solid #10b981; color: #059669; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Clear</button>
             </div>
             <div id="execution-status" class="execution-status hidden">
                 <span class="spinner-small"></span>
@@ -774,6 +905,7 @@ HTML_TEMPLATE = """
         
         let currentSuiteId = null;
         let currentSuite = null;
+        let currentHierarchy = null;  // Hierarchical structure: Payment Method -> Provider -> Test Cases
         let currentExecutionId = null;
         let testResults = {};
         let summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
@@ -917,11 +1049,58 @@ HTML_TEMPLATE = """
             if (file) handleFile(file);
         });
         
+        // Scoping document options handling
+        const scopingOptions = document.getElementById('csv-options');
+        const scopingFilename = document.getElementById('csv-filename');
+        let pendingFile = null;
+        
+        function showScopingOptions(file) {
+            pendingFile = file;
+            scopingFilename.textContent = `File: ${file.name}`;
+            scopingOptions.classList.remove('hidden');
+        }
+        
+        function hideScopingOptions() {
+            scopingOptions.classList.add('hidden');
+            pendingFile = null;
+        }
+        
+        // Upload button handlers
+        document.getElementById('csv-upload-btn').addEventListener('click', () => {
+            if (pendingFile) {
+                processFile(pendingFile);
+            }
+        });
+        
+        document.getElementById('csv-cancel-btn').addEventListener('click', () => {
+            hideScopingOptions();
+            fileInput.value = '';
+        });
+        
         async function handleFile(file) {
+            // Validate CSV file
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                uploadError.textContent = 'Invalid file format. Please upload a CSV scoping document.';
+                uploadError.classList.remove('hidden');
+                return;
+            }
+            
+            // Show options first
+            if (scopingOptions.classList.contains('hidden')) {
+                showScopingOptions(file);
+                return;
+            }
+        }
+        
+        async function processFile(file) {
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('only_implemented', document.getElementById('only-implemented').checked);
+            formData.append('merchant_id', document.getElementById('merchant-id').value);
+            formData.append('environment', document.getElementById('environment-select').value);
             
             uploadError.classList.add('hidden');
+            hideScopingOptions();
             
             try {
                 const response = await fetch('/upload', {
@@ -939,8 +1118,19 @@ HTML_TEMPLATE = """
                 
                 currentSuiteId = data.suite_id;
                 currentSuite = data.test_suite;
-                // Select all test cases by default
-                selectedTestCases = new Set(data.test_suite.test_cases.map(tc => tc.id));
+                currentHierarchy = data.hierarchy;
+                
+                // Flatten test cases and select all by default
+                const allTestCases = [];
+                currentHierarchy.forEach(pm => {
+                    pm.providers.forEach(provider => {
+                        provider.test_cases.forEach(tc => {
+                            allTestCases.push(tc);
+                        });
+                    });
+                });
+                currentSuite.test_cases = allTestCases;
+                selectedTestCases = new Set(allTestCases.map(tc => tc.id));
                 
                 // Automatically apply saved payload from builder to all test cases
                 const savedPayload = sessionStorage.getItem('payment_payload');
@@ -960,7 +1150,7 @@ HTML_TEMPLATE = """
                     }
                 }
                 
-                displayTestSuite(currentSuite);
+                displayHierarchicalTestSuite();
                 updateSelectionCount();
                 
             } catch (error) {
@@ -970,7 +1160,298 @@ HTML_TEMPLATE = """
         }
         
         
+        function displayHierarchicalTestSuite() {
+            // Display metadata
+            metadataDiv.innerHTML = `
+                <div class="metadata-item">
+                    <div class="metadata-label">Suite Name</div>
+                    <div class="metadata-value">${currentSuite.metadata.test_suite_name}</div>
+                </div>
+                <div class="metadata-item">
+                    <div class="metadata-label">Environment</div>
+                    <div class="metadata-value">${currentSuite.metadata.environment}</div>
+                </div>
+                <div class="metadata-item">
+                    <div class="metadata-label">Merchant ID</div>
+                    <div class="metadata-value">${currentSuite.metadata.merchant_id}</div>
+                </div>
+            `;
+            
+            // Display hierarchical test cases
+            let html = '';
+            let pmIndex = 0;
+            
+            currentHierarchy.forEach(pm => {
+                pmIndex++;
+                const pmTestCount = pm.providers.reduce((sum, p) => sum + p.test_cases.length, 0);
+                const pmTestIds = [];
+                pm.providers.forEach(p => p.test_cases.forEach(tc => pmTestIds.push(tc.id)));
+                const pmAllSelected = pmTestIds.every(id => selectedTestCases.has(id));
+                const pmSomeSelected = pmTestIds.some(id => selectedTestCases.has(id));
+                
+                html += `
+                    <div class="hierarchy-group payment-method-group" id="pm-${pm.id}">
+                        <div class="hierarchy-header payment-method-header" onclick="toggleHierarchyGroup('pm-${pm.id}')">
+                            <div class="hierarchy-checkbox" onclick="event.stopPropagation()">
+                                <input type="checkbox" 
+                                       id="cb-pm-${pm.id}" 
+                                       ${pmAllSelected ? 'checked' : ''} 
+                                       ${pmSomeSelected && !pmAllSelected ? 'indeterminate' : ''}
+                                       onchange="togglePaymentMethodSelection('${pm.id}')">
+                            </div>
+                            <span class="hierarchy-expand-icon">▶</span>
+                            <span class="hierarchy-number">${pmIndex}.</span>
+                            <span class="hierarchy-name">${pm.name}</span>
+                            <span class="hierarchy-count">${pmTestCount} tests</span>
+                        </div>
+                        <div class="hierarchy-children">
+                `;
+                
+                let providerIndex = 0;
+                pm.providers.forEach(provider => {
+                    providerIndex++;
+                    const providerTestIds = provider.test_cases.map(tc => tc.id);
+                    const providerAllSelected = providerTestIds.every(id => selectedTestCases.has(id));
+                    const providerSomeSelected = providerTestIds.some(id => selectedTestCases.has(id));
+                    
+                    html += `
+                        <div class="hierarchy-group provider-group" id="provider-${pm.id}-${provider.id}">
+                            <div class="hierarchy-header provider-header" onclick="toggleHierarchyGroup('provider-${pm.id}-${provider.id}')">
+                                <div class="hierarchy-checkbox" onclick="event.stopPropagation()">
+                                    <input type="checkbox" 
+                                           id="cb-provider-${pm.id}-${provider.id}" 
+                                           ${providerAllSelected ? 'checked' : ''} 
+                                           ${providerSomeSelected && !providerAllSelected ? 'indeterminate' : ''}
+                                           onchange="toggleProviderSelection('${pm.id}', '${provider.id}')">
+                                </div>
+                                <span class="hierarchy-expand-icon">▶</span>
+                                <span class="hierarchy-number">${pmIndex}.${providerIndex}</span>
+                                <span class="hierarchy-name">${provider.name}</span>
+                                <span class="hierarchy-count">${provider.test_cases.length} tests</span>
+                            </div>
+                            <div class="hierarchy-children">
+                    `;
+                    
+                    let tcIndex = 0;
+                    provider.test_cases.forEach(tc => {
+                        tcIndex++;
+                        html += renderTestCaseHtml(tc, `${pmIndex}.${providerIndex}.${tcIndex}`);
+                    });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+            
+            testcasesList.innerHTML = html;
+            
+            // Set indeterminate state for checkboxes
+            currentHierarchy.forEach(pm => {
+                const pmTestIds = [];
+                pm.providers.forEach(p => p.test_cases.forEach(tc => pmTestIds.push(tc.id)));
+                const pmAllSelected = pmTestIds.every(id => selectedTestCases.has(id));
+                const pmSomeSelected = pmTestIds.some(id => selectedTestCases.has(id));
+                const pmCb = document.getElementById(`cb-pm-${pm.id}`);
+                if (pmCb) pmCb.indeterminate = pmSomeSelected && !pmAllSelected;
+                
+                pm.providers.forEach(provider => {
+                    const providerTestIds = provider.test_cases.map(tc => tc.id);
+                    const providerAllSelected = providerTestIds.every(id => selectedTestCases.has(id));
+                    const providerSomeSelected = providerTestIds.some(id => selectedTestCases.has(id));
+                    const providerCb = document.getElementById(`cb-provider-${pm.id}-${provider.id}`);
+                    if (providerCb) providerCb.indeterminate = providerSomeSelected && !providerAllSelected;
+                });
+            });
+            
+            testcasesSection.classList.remove('hidden');
+            uploadSection.classList.add('hidden');
+        }
+        
+        function renderTestCaseHtml(tc, indexStr) {
+            const result = testResults[tc.id];
+            let statusClass = '';
+            let statusIcon = '';
+            let durationHtml = '';
+            
+            if (result) {
+                statusClass = result.status === 'pass' ? 'passed' : 
+                              result.status === 'fail' ? 'failed' : 'error';
+                statusIcon = result.status === 'pass' ? '✓' : 
+                            result.status === 'fail' ? '✗' : '⚠';
+                durationHtml = `<span class="test-case-duration">${result.duration_ms}ms</span>`;
+            }
+            
+            const stepsDetailsHtml = tc.steps.map(step => {
+                const stepResult = result?.steps?.find(s => s.step_id === step.step_id);
+                const stepStatusClass = stepResult ? stepResult.status : '';
+                const stepResultBadge = stepResult ? `
+                    <span class="step-result-badge ${stepResult.status}">${stepResult.status.toUpperCase()}</span>
+                    ${stepResult.duration_ms ? `<span style="color:#888;font-size:0.8rem;margin-left:8px">${stepResult.duration_ms}ms</span>` : ''}
+                ` : '';
+                
+                const responseStatusHtml = stepResult?.response_status ? `
+                    <div class="step-section">
+                        <div class="step-section-label">API Response</div>
+                        <div class="response-status-row">
+                            <span class="response-status-badge">${stepResult.response_status}</span>
+                            ${stepResult.response_substatus ? `<span class="response-substatus-badge">${stepResult.response_substatus}</span>` : ''}
+                            ${stepResult.http_status_code ? `<span class="http-status-code">HTTP ${stepResult.http_status_code}</span>` : ''}
+                        </div>
+                    </div>
+                ` : '';
+                
+                const requestHtml = step.input_data && Object.keys(step.input_data).length > 0 
+                    ? `<div class="step-section">
+                        <div class="collapsible-section" onclick="this.classList.toggle('open')">
+                            <div class="collapsible-header">
+                                <span class="collapse-icon">▶</span>
+                                Request
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="step-data">${JSON.stringify(step.input_data, null, 2)}</div>
+                            </div>
+                        </div>
+                       </div>` 
+                    : '';
+                
+                const responseHtml = stepResult?.response_body 
+                    ? `<div class="step-section">
+                        <div class="collapsible-section" onclick="this.classList.toggle('open')">
+                            <div class="collapsible-header">
+                                <span class="collapse-icon">▶</span>
+                                Response
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="step-data">${JSON.stringify(stepResult.response_body, null, 2)}</div>
+                            </div>
+                        </div>
+                       </div>` 
+                    : '';
+                
+                let captureVarsHtml = '';
+                if (stepResult?.captured_variables && Object.keys(stepResult.captured_variables).length > 0) {
+                    captureVarsHtml = `<div class="step-section">
+                        <div class="step-section-label">Captured Values</div>
+                        <div class="capture-vars">
+                            ${Object.entries(stepResult.captured_variables).map(([name, value]) => 
+                                `<span class="capture-var captured">${name} = ${JSON.stringify(value)}</span>`
+                            ).join('')}
+                        </div>
+                    </div>`;
+                } else if (step.capture_variables && Object.keys(step.capture_variables).length > 0) {
+                    captureVarsHtml = `<div class="step-section">
+                        <div class="step-section-label">Variables to Capture</div>
+                        <div class="capture-vars">
+                            ${Object.entries(step.capture_variables).map(([name, path]) => 
+                                `<span class="capture-var">${name} ← ${path}</span>`
+                            ).join('')}
+                        </div>
+                    </div>`;
+                }
+                
+                const errorHtml = stepResult?.error_message 
+                    ? `<div class="step-error-msg">${stepResult.error_message}</div>` 
+                    : '';
+                
+                return `
+                    <div class="step-detail ${stepStatusClass}">
+                        <div class="step-detail-header">
+                            <span class="step-number">${step.step_id}</span>
+                            <span class="step-operation">${step.operation}</span>
+                            <span style="color:#1a1a2e">${step.description}</span>
+                            <span class="step-provider">${step.provider}</span>
+                            ${stepResultBadge}
+                        </div>
+                        <div class="step-detail-body">
+                            ${requestHtml}
+                            ${responseStatusHtml}
+                            ${responseHtml}
+                            ${captureVarsHtml}
+                            ${step.expected_status ? `<div class="step-section">
+                                <div class="step-section-label">Expected Status</div>
+                                <span style="color:#059669;font-weight:500">${step.expected_status}</span>
+                            </div>` : ''}
+                            ${errorHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            const isSelected = selectedTestCases.has(tc.id);
+            
+            return `
+                <div class="test-case ${statusClass}" id="tc-${tc.id}">
+                    <div class="test-case-summary">
+                        <div class="test-case-checkbox" onclick="event.stopPropagation()">
+                            <input type="checkbox" 
+                                   id="cb-${tc.id}" 
+                                   ${isSelected ? 'checked' : ''} 
+                                   onchange="toggleTestCaseSelection('${tc.id}')">
+                        </div>
+                        <div class="test-case-content" onclick="toggleTestCase('${tc.id}')">
+                            <div class="test-case-header">
+                                <span class="test-case-index">${indexStr}</span>
+                                <span class="test-case-name">
+                                    ${statusIcon ? `<span class="status-icon">${statusIcon}</span>` : ''}
+                                    ${tc.name}
+                                </span>
+                                ${durationHtml}
+                            </div>
+                            <div class="test-case-desc">${tc.description}</div>
+                            <div class="steps-info">
+                                <span class="expand-icon">▶</span>
+                                ${tc.steps.length} step${tc.steps.length !== 1 ? 's' : ''}: ${tc.steps.map(s => s.operation).join(' → ')}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="test-case-details">
+                        <div class="test-case-details-inner">
+                            ${stepsDetailsHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
         function displayTestSuite(suite, showResults = false) {
+            // Legacy function - redirect to hierarchical display if hierarchy exists
+            if (currentHierarchy) {
+                displayHierarchicalTestSuite();
+                return;
+            }
+            
+            // Fallback for non-hierarchical data
+            // Display metadata
+            metadataDiv.innerHTML = `
+                <div class="metadata-item">
+                    <div class="metadata-label">Suite Name</div>
+                    <div class="metadata-value">${suite.metadata.test_suite_name}</div>
+                </div>
+                <div class="metadata-item">
+                    <div class="metadata-label">Environment</div>
+                    <div class="metadata-value">${suite.metadata.environment}</div>
+                </div>
+                <div class="metadata-item">
+                    <div class="metadata-label">Merchant ID</div>
+                    <div class="metadata-value">${suite.metadata.merchant_id}</div>
+                </div>
+            `;
+            
+            // Display test cases
+            testcasesList.innerHTML = suite.test_cases.map((tc, idx) => renderTestCaseHtml(tc, `${idx + 1}`)).join('');
+            
+            testcasesSection.classList.remove('hidden');
+            uploadSection.classList.add('hidden');
+        }
+        
+        function displayTestSuiteOld(suite, showResults = false) {
             // Display metadata
             metadataDiv.innerHTML = `
                 <div class="metadata-item">
@@ -1150,14 +1631,112 @@ HTML_TEMPLATE = """
             }
         }
         
+        function toggleHierarchyGroup(groupId) {
+            const element = document.getElementById(groupId);
+            if (element) {
+                element.classList.toggle('expanded');
+            }
+        }
+        
         function toggleTestCaseSelection(tcId) {
             if (selectedTestCases.has(tcId)) {
                 selectedTestCases.delete(tcId);
             } else {
                 selectedTestCases.add(tcId);
             }
+            updateHierarchyCheckboxes();
             updateSelectionCount();
             updateSelectAllCheckbox();
+        }
+        
+        function togglePaymentMethodSelection(pmId) {
+            const pm = currentHierarchy.find(p => p.id === pmId);
+            if (!pm) return;
+            
+            const pmTestIds = [];
+            pm.providers.forEach(provider => {
+                provider.test_cases.forEach(tc => pmTestIds.push(tc.id));
+            });
+            
+            const allSelected = pmTestIds.every(id => selectedTestCases.has(id));
+            
+            if (allSelected) {
+                // Deselect all
+                pmTestIds.forEach(id => selectedTestCases.delete(id));
+            } else {
+                // Select all
+                pmTestIds.forEach(id => selectedTestCases.add(id));
+            }
+            
+            // Update checkboxes
+            pmTestIds.forEach(id => {
+                const cb = document.getElementById(`cb-${id}`);
+                if (cb) cb.checked = selectedTestCases.has(id);
+            });
+            
+            updateHierarchyCheckboxes();
+            updateSelectionCount();
+            updateSelectAllCheckbox();
+        }
+        
+        function toggleProviderSelection(pmId, providerId) {
+            const pm = currentHierarchy.find(p => p.id === pmId);
+            if (!pm) return;
+            
+            const provider = pm.providers.find(p => p.id === providerId);
+            if (!provider) return;
+            
+            const providerTestIds = provider.test_cases.map(tc => tc.id);
+            const allSelected = providerTestIds.every(id => selectedTestCases.has(id));
+            
+            if (allSelected) {
+                // Deselect all
+                providerTestIds.forEach(id => selectedTestCases.delete(id));
+            } else {
+                // Select all
+                providerTestIds.forEach(id => selectedTestCases.add(id));
+            }
+            
+            // Update test case checkboxes
+            providerTestIds.forEach(id => {
+                const cb = document.getElementById(`cb-${id}`);
+                if (cb) cb.checked = selectedTestCases.has(id);
+            });
+            
+            updateHierarchyCheckboxes();
+            updateSelectionCount();
+            updateSelectAllCheckbox();
+        }
+        
+        function updateHierarchyCheckboxes() {
+            if (!currentHierarchy) return;
+            
+            currentHierarchy.forEach(pm => {
+                // Update provider checkboxes
+                pm.providers.forEach(provider => {
+                    const providerTestIds = provider.test_cases.map(tc => tc.id);
+                    const providerAllSelected = providerTestIds.every(id => selectedTestCases.has(id));
+                    const providerSomeSelected = providerTestIds.some(id => selectedTestCases.has(id));
+                    
+                    const providerCb = document.getElementById(`cb-provider-${pm.id}-${provider.id}`);
+                    if (providerCb) {
+                        providerCb.checked = providerAllSelected;
+                        providerCb.indeterminate = providerSomeSelected && !providerAllSelected;
+                    }
+                });
+                
+                // Update payment method checkbox
+                const pmTestIds = [];
+                pm.providers.forEach(p => p.test_cases.forEach(tc => pmTestIds.push(tc.id)));
+                const pmAllSelected = pmTestIds.every(id => selectedTestCases.has(id));
+                const pmSomeSelected = pmTestIds.some(id => selectedTestCases.has(id));
+                
+                const pmCb = document.getElementById(`cb-pm-${pm.id}`);
+                if (pmCb) {
+                    pmCb.checked = pmAllSelected;
+                    pmCb.indeterminate = pmSomeSelected && !pmAllSelected;
+                }
+            });
         }
         
         function toggleSelectAll() {
@@ -1174,6 +1753,7 @@ HTML_TEMPLATE = """
                 const cb = document.getElementById(`cb-${tc.id}`);
                 if (cb) cb.checked = selectAllCheckbox.checked;
             });
+            updateHierarchyCheckboxes();
             updateSelectionCount();
         }
         
@@ -1549,7 +2129,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload and parse test suite."""
+    """Handle scoping document CSV upload and generate test suite."""
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
     
@@ -1557,18 +2137,77 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
     
+    filename = file.filename.lower()
+    
+    # Only accept CSV files
+    if not filename.endswith('.csv'):
+        return jsonify({'error': 'Invalid file format. Please upload a CSV scoping document.'}), 400
+    
     try:
         content = file.read().decode('utf-8')
-        json_data = json.loads(content)
-        test_suite = TestCaseParser.parse_test_suite(json_data)
+        
+        # Parse scoping document CSV and generate test cases
+        scoping_doc = ScopingParser.load_from_string(content)
+        
+        # Configure generator
+        generator_config = GeneratorConfig(
+            merchant_id=request.form.get('merchant_id', 'matrix_test'),
+            environment=request.form.get('environment', 'sandbox'),
+            test_suite_name=request.form.get('suite_name'),
+            only_implemented=request.form.get('only_implemented', 'false').lower() == 'true'
+        )
+        
+        generator = TestCaseGenerator(generator_config)
+        hierarchical_suite = generator.generate_hierarchical_test_suite(scoping_doc)
+        test_suite = hierarchical_suite.to_flat_test_suite()
         
         # Store the test suite
         suite_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         uploaded_suites[suite_id] = test_suite
         
-        # Return parsed data
-        return jsonify({
+        # Build hierarchical structure for response
+        hierarchy = []
+        for pm_group in hierarchical_suite.payment_methods:
+            pm_data = {
+                'id': pm_group.payment_method_id,
+                'name': pm_group.payment_method,
+                'providers': []
+            }
+            
+            for provider_group in pm_group.providers:
+                provider_data = {
+                    'id': provider_group.provider_id,
+                    'name': provider_group.provider,
+                    'integration_id': provider_group.integration_id,
+                    'test_cases': [
+                        {
+                            'id': tc.id,
+                            'name': tc.name,
+                            'description': tc.description,
+                            'steps': [
+                                {
+                                    'step_id': s.step_id,
+                                    'operation': s.operation,
+                                    'provider': s.provider,
+                                    'description': s.description,
+                                    'input_data': s.input_data,
+                                    'capture_variables': s.capture_variables,
+                                    'expected_status': s.expected_status
+                                }
+                                for s in tc.steps
+                            ]
+                        }
+                        for tc in provider_group.test_cases
+                    ]
+                }
+                pm_data['providers'].append(provider_data)
+            
+            hierarchy.append(pm_data)
+        
+        # Build response
+        response_data = {
             'suite_id': suite_id,
+            'hierarchy': hierarchy,
             'test_suite': {
                 'version': test_suite.version,
                 'metadata': {
@@ -1576,34 +2215,14 @@ def upload_file():
                     'merchant_id': test_suite.metadata.merchant_id,
                     'environment': test_suite.metadata.environment,
                     'created_at': test_suite.metadata.created_at
-                },
-                'test_cases': [
-                    {
-                        'id': tc.id,
-                        'name': tc.name,
-                        'description': tc.description,
-                        'steps': [
-                            {
-                                'step_id': s.step_id,
-                                'operation': s.operation,
-                                'provider': s.provider,
-                                'description': s.description,
-                                'input_data': s.input_data,
-                                'capture_variables': s.capture_variables,
-                                'expected_status': s.expected_status
-                            }
-                            for s in tc.steps
-                        ]
-                    }
-                    for tc in test_suite.test_cases
-                ]
+                }
             }
-        })
+        }
         
-    except json.JSONDecodeError as e:
-        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
-    except TestCaseParseError as e:
-        return jsonify({'error': f'Invalid test case format: {str(e)}'}), 400
+        return jsonify(response_data)
+        
+    except ScopingParseError as e:
+        return jsonify({'error': f'Invalid scoping document: {str(e)}'}), 400
     except Exception as e:
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 

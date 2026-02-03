@@ -6,12 +6,14 @@ Automated testing system for merchant API operations with comprehensive logging 
 
 ## Features
 
-- ✅ JSON-based test case definitions
+- ✅ **CSV scoping document input** - Generate test cases from implementation scoping documents
+- ✅ Automatic test case generation based on provider capabilities
 - ✅ Variable passing between test steps using JSONPath
 - ✅ Support for multiple payment operations (authorize, capture, purchase, refund, etc.)
 - ✅ Comprehensive logging for certification proof
 - ✅ Sensitive data masking (card numbers, API keys)
 - ✅ Colored console output
+- ✅ Web interface for test execution
 - ✅ 90%+ test coverage on core modules
 
 ## Installation
@@ -77,129 +79,100 @@ Get your API keys from the [Yuno Dashboard](https://dashboard.y.uno):
 
 ### Running Tests
 
+MATRIX uses **CSV scoping documents** as input. These documents define which features and operations each provider/payment method combination supports, and MATRIX automatically generates appropriate test cases.
+
 ```bash
-# Run with example test case
-python main.py --testcase examples/sample_testcase.json
+# Run with scoping document CSV
+python main.py --scoping examples/sample_scoping_document.csv
 
-# Specify custom config
-python main.py --testcase tests.json --config config/custom_config.json
+# With generation options
+python main.py --scoping scoping.csv --only-implemented --merchant-id my_merchant
 
-# Custom log directory
-python main.py --testcase tests.json --log-dir ./my_logs
+# Filter specific operations
+python main.py --scoping scoping.csv --operations authorize capture refund
+
+# Custom environment and log directory
+python main.py --scoping scoping.csv --environment sandbox --log-dir ./my_logs
 ```
 
-### Test Case File Format
+### CLI Options
 
-Test cases are defined in JSON format:
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--scoping` | Path to scoping document CSV file | (required) |
+| `--config` | Path to config file | `config/config.json` |
+| `--log-dir` | Directory for log files | `logs` |
+| `--merchant-id` | Merchant ID for generated tests | `matrix_test` |
+| `--environment` | Environment (sandbox/production) | `sandbox` |
+| `--suite-name` | Custom test suite name | Auto-generated |
+| `--only-implemented` | Only test implemented operations | `false` |
+| `--operations` | Specific operations to test | All supported |
 
-```json
-{
-  "version": "1.0",
-  "metadata": {
-    "test_suite_name": "Merchant Certification Tests",
-    "merchant_id": "merchant_123",
-    "environment": "sandbox",
-    "created_at": "2026-01-29T10:00:00Z"
-  },
-  "test_cases": [
-    {
-      "id": "tc_001",
-      "name": "Authorize and Capture Flow",
-      "description": "Test authorization followed by capture",
-      "steps": [
-        {
-          "step_id": 1,
-          "operation": "authorize",
-          "provider": "provider_a",
-          "description": "Authorize payment",
-          "input_data": {
-            "amount": 100.00,
-            "currency": "USD"
-          },
-          "capture_variables": {
-            "transaction_id": "$.body.transaction_id"
-          }
-        },
-        {
-          "step_id": 2,
-          "operation": "capture",
-          "provider": "provider_a",
-          "description": "Capture authorized payment",
-          "input_data": {
-            "transaction_id": "{{transaction_id}}",
-            "amount": 100.00
-          }
-        }
-      ]
-    }
-  ]
-}
+### Scoping Document Format (CSV)
+
+The scoping document CSV defines provider integrations and their supported operations. The format follows the implementation scoping document structure:
+
+```csv
+,Feature,PROVIDER_PAYMENT,,,ANOTHER_PROVIDER,,,
+,Provider,PROVIDER_NAME,,,ANOTHER_NAME,,,
+,Payment_Method,CARD,,,PIX,,,
+,,INFORMATION,STATUS,ADDITIONAL INFO,INFORMATION,STATUS,ADDITIONAL INFO
+,Country,Brazil,Supported,,Brazil,Supported,
+,Authorize,TRUE,Implemented,,FALSE,Not Applicable,
+,Capture,TRUE,Implemented,,FALSE,Not Applicable,
+,Purchase,FALSE,Not Applicable,,TRUE,Implemented,
+,Refund,TRUE,Implemented,,TRUE,Implemented,
 ```
 
-### Variable Substitution
+**Key rows:**
+- **Row 1**: Integration identifiers (e.g., `REDE_CARD`, `PAGBANK_PIX`)
+- **Row 2**: Provider names (e.g., `REDE`, `PAGBANK`)
+- **Row 3**: Payment methods (`CARD`, `PIX`, `BOLETO`)
+- **Row 4**: Column headers (INFORMATION, STATUS, ADDITIONAL INFO for each integration)
+- **Row 5+**: Feature rows
 
-- Use `{{variable_name}}` syntax to reference variables from previous steps
-- Use JSONPath expressions to extract values from responses
-- Example: `"transaction_id": "$.body.transaction_id"`
+**Key columns per integration (3 columns each):**
+- **INFORMATION**: Feature value (TRUE/FALSE, country name, etc.)
+- **STATUS**: Implementation status (Implemented, Not Applicable, Not Implemented)
+- **ADDITIONAL INFO**: Optional notes
 
-### Supported Operations
+**Supported operations:**
+- `Verify`, `Authorize`, `Capture`, `Purchase`, `Refund`, `Cancel`
+- `Partial_Capture`, `Partial_Refund`, `Multiple_Captures`, `Multiple_Refunds`
 
-- `payment` - Yuno payment API call (recommended for Yuno integration)
-- `authorize` - Payment authorization (Yuno: creates payment with capture=false)
-- `capture` - Capture authorized payment (Yuno: POST /payments/{id}/capture)
-- `purchase` - Direct purchase (auth + capture) (Yuno: creates payment with capture=true)
-- `refund` - Refund a transaction (Yuno: POST /payments/{id}/refund)
-- `void` - Void a transaction (Yuno: POST /payments/{id}/void)
-- `verify` - Verification operation (placeholder only)
-- `tokenize` - Card tokenization (placeholder only)
+See [examples/sample_scoping_document.csv](examples/sample_scoping_document.csv) for a complete example.
 
-### Yuno Payment Example
+### Generated Test Flows
 
-See [examples/yuno_payment_testcase.json](examples/yuno_payment_testcase.json) for complete Yuno payment examples.
+Based on the scoping document, MATRIX generates appropriate test flows:
 
-**Basic Yuno Payment:**
-```json
-{
-  "step_id": 1,
-  "operation": "payment",
-  "provider": "safrapay",
-  "description": "Create Yuno payment",
-  "input_data": {
-    "description": "Test Payment",
-    "merchant_order_id": "order_123",
-    "country": "BR",
-    "amount": {
-      "currency": "BRL",
-      "value": 100
-    },
-    "customer_payer": {
-      "email": "customer@example.com",
-      "first_name": "John",
-      "last_name": "Doe"
-    },
-    "payment_method": {
-      "type": "CARD",
-      "detail": {
-        "card": {
-          "capture": true,
-          "installments": 1,
-          "card_data": {
-            "number": "4444585001234562",
-            "expiration_month": 12,
-            "expiration_year": 27,
-            "security_code": "123",
-            "holder_name": "John Doe"
-          }
-        }
-      }
-    }
-  },
-  "capture_variables": {
-    "payment_id": "$.body.id",
-    "transaction_id": "$.body.transaction_id"
-  }
-}
+**For CARD payment methods:**
+- `authorize_capture` - Authorize followed by capture
+- `authorize_cancel` - Authorize followed by cancel/void
+- `authorize_capture_refund` - Full payment lifecycle
+
+**For PIX/BOLETO payment methods:**
+- `purchase` - Direct purchase
+- `purchase_refund` - Purchase followed by refund
+
+### Web Interface
+
+MATRIX provides a web interface for uploading scoping documents and executing tests:
+
+```bash
+# Start the web interface
+python web.py
+
+# Access at http://localhost:5000
 ```
+
+**Web interface features:**
+- Upload CSV scoping documents
+- Configure generation options (merchant ID, environment, implemented-only filter)
+- Select specific test cases to run
+- Real-time execution progress with streaming results
+- View detailed request/response logs
+- Download execution reports
 
 ## Development
 
@@ -210,7 +183,7 @@ See [examples/yuno_payment_testcase.json](examples/yuno_payment_testcase.json) f
 pytest --cov=src --cov-report=html --cov-report=term-missing
 
 # Run specific test file
-pytest tests/test_models.py -v
+pytest tests/test_scoping_parser.py -v
 
 # Run with markers
 pytest -m unit -v
@@ -221,8 +194,9 @@ pytest -m unit -v
 Target: **85% overall coverage**
 
 Current module coverage:
-- models.py: 99%
-- parser.py: 92%
+- models.py: 93%
+- scoping_parser.py: 96%
+- test_generator.py: 92%
 - context.py: 97%
 - logger.py: 94%
 - api_client.py: 100%
@@ -233,21 +207,22 @@ Current module coverage:
 yuno-matrix/
 ├── src/
 │   ├── models.py          # Pydantic data models
-│   ├── parser.py          # JSON test case parser
+│   ├── scoping_parser.py  # CSV scoping document parser
+│   ├── test_generator.py  # Test case generator from scoping docs
 │   ├── context.py         # Variable context manager
 │   ├── api_client.py      # API client (Yuno API + placeholder mode)
 │   ├── logger.py          # Certification logger
 │   └── executor.py        # Test execution orchestrator
 ├── tests/                 # Unit and integration tests
-├── examples/              # Example test case files
-│   ├── sample_testcase.json       # Generic examples
-│   └── yuno_payment_testcase.json # Yuno-specific examples
+├── examples/              # Example scoping documents
+│   └── sample_scoping_document.csv
 ├── logs/                  # Execution logs (gitignored)
 ├── config/
 │   └── config.json        # Configuration with Yuno settings
 ├── .env.example          # Template for API credentials
 ├── .env                  # Your credentials (DO NOT COMMIT)
 ├── main.py               # CLI entry point
+├── web.py                # Web interface
 └── README.md
 ```
 
