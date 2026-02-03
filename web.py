@@ -12,6 +12,8 @@ from src.api_client import APIClient
 from src.logger import CertificationLogger
 from src.context import ExecutionContext, ContextError
 from src.models import Config, TestSuite, TestCase, Step, StepResult, TestCaseResult, APIRequest
+from src.schemas import CreatePaymentRequest, get_presets
+from src.schemas.schema_utils import schema_to_json
 
 app = Flask(__name__)
 
@@ -547,6 +549,15 @@ HTML_TEMPLATE = """
             background: #d1d5db;
         }
         
+        .btn-success {
+            background: #059669;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #047857;
+        }
+        
         .actions {
             display: flex;
             gap: 12px;
@@ -684,7 +695,26 @@ HTML_TEMPLATE = """
         
         <!-- Upload Section -->
         <div class="card" id="upload-section">
-            <h2>Upload Test Case File</h2>
+            <h2>Create or Load Test Case</h2>
+            
+            <!-- Quick Actions -->
+            <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                <a href="/builder" class="btn btn-primary" style="text-decoration: none; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">+</span> Build Payment Request
+                </a>
+                <button class="btn btn-secondary" id="quick-test-btn" onclick="createQuickTest()">
+                    Quick Test from Builder
+                </button>
+            </div>
+            
+            <!-- Saved Payload Notice -->
+            <div id="saved-payload-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
+                <span style="color: #059669;">You have a saved payment payload. It will be used for all selected providers.</span>
+            </div>
+            
+            <div style="text-align: center; color: #888; margin: 16px 0;">— or —</div>
+            
+            <h3 style="font-size: 1rem; color: #666; margin-bottom: 12px;">Upload Test Suite File</h3>
             <div class="upload-area" id="upload-area">
                 <input type="file" id="file-input" accept=".json">
                 <div class="upload-icon">📄</div>
@@ -700,6 +730,9 @@ HTML_TEMPLATE = """
         <div class="card hidden" id="testcases-section">
             <h2>Test Suite</h2>
             <div class="metadata" id="metadata"></div>
+            <div id="payload-active-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
+                <span style="color: #059669;">You have a saved payment payload. It will be used for all selected providers.</span>
+            </div>
             <div id="execution-status" class="execution-status hidden">
                 <span class="spinner-small"></span>
                 <span id="status-text">Running tests...</span>
@@ -745,6 +778,120 @@ HTML_TEMPLATE = """
         let testResults = {};
         let summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
         let selectedTestCases = new Set();
+        
+        // Check for saved payload from builder on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedPayload = sessionStorage.getItem('payment_payload');
+            if (savedPayload) {
+                document.getElementById('saved-payload-notice').classList.remove('hidden');
+            }
+        });
+        
+        // Builder integration functions
+        function createQuickTest() {
+            const savedPayload = sessionStorage.getItem('payment_payload');
+            if (!savedPayload) {
+                // Redirect to builder if no payload saved
+                window.location.href = '/builder';
+                return;
+            }
+            useBuilderPayload();
+        }
+        
+        function useBuilderPayload() {
+            const savedPayload = sessionStorage.getItem('payment_payload');
+            if (!savedPayload) {
+                uploadError.textContent = 'No saved payload found. Please use the Payment Builder first.';
+                uploadError.classList.remove('hidden');
+                return;
+            }
+            
+            try {
+                const payload = JSON.parse(savedPayload);
+                
+                // Create a minimal test suite with the payload
+                const testSuite = {
+                    version: "1.0",
+                    metadata: {
+                        test_suite_name: "Quick Test from Builder",
+                        merchant_id: payload.account_id || "builder_test",
+                        environment: "sandbox",
+                        created_at: new Date().toISOString()
+                    },
+                    test_cases: [
+                        {
+                            id: "tc_quick_" + Date.now(),
+                            name: "Payment Request Test",
+                            description: payload.description || "Test payment from builder",
+                            steps: [
+                                {
+                                    step_id: 1,
+                                    operation: "payment",
+                                    provider: extractProvider(payload),
+                                    description: "Execute payment request",
+                                    input_data: payload,
+                                    capture_variables: {
+                                        payment_id: "$.body.id",
+                                        transaction_id: "$.body.transactions.id",
+                                        status: "$.body.status"
+                                    },
+                                    expected_status: "success"
+                                }
+                            ]
+                        }
+                    ]
+                };
+                
+                // Submit to upload endpoint
+                const formData = new FormData();
+                const blob = new Blob([JSON.stringify(testSuite)], { type: 'application/json' });
+                formData.append('file', blob, 'quick_test.json');
+                
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        uploadError.textContent = data.error;
+                        uploadError.classList.remove('hidden');
+                        return;
+                    }
+                    
+                    currentSuiteId = data.suite_id;
+                    currentSuite = data.test_suite;
+                    selectedTestCases = new Set(data.test_suite.test_cases.map(tc => tc.id));
+                    displayTestSuite(data.test_suite);
+                    updateSelectionCount();
+                    
+                    // Clear the saved payload
+                    clearBuilderPayload();
+                })
+                .catch(error => {
+                    uploadError.textContent = 'Failed to create test: ' + error.message;
+                    uploadError.classList.remove('hidden');
+                });
+                
+            } catch (e) {
+                uploadError.textContent = 'Invalid saved payload: ' + e.message;
+                uploadError.classList.remove('hidden');
+            }
+        }
+        
+        function clearBuilderPayload() {
+            sessionStorage.removeItem('payment_payload');
+            document.getElementById('saved-payload-notice').classList.add('hidden');
+        }
+        
+        function extractProvider(payload) {
+            // Try to extract provider from metadata or use default
+            if (payload.metadata && Array.isArray(payload.metadata)) {
+                const providerMeta = payload.metadata.find(m => m.key === 'provider');
+                if (providerMeta) return providerMeta.value;
+            }
+            return 'yuno';
+        }
         
         // File upload handling
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -794,7 +941,26 @@ HTML_TEMPLATE = """
                 currentSuite = data.test_suite;
                 // Select all test cases by default
                 selectedTestCases = new Set(data.test_suite.test_cases.map(tc => tc.id));
-                displayTestSuite(data.test_suite);
+                
+                // Automatically apply saved payload from builder to all test cases
+                const savedPayload = sessionStorage.getItem('payment_payload');
+                if (savedPayload) {
+                    try {
+                        const payload = JSON.parse(savedPayload);
+                        // Apply to first step of all test cases
+                        currentSuite.test_cases.forEach(tc => {
+                            if (tc.steps.length > 0) {
+                                tc.steps[0].input_data = payload;
+                            }
+                        });
+                        // Show the notice in the test cases section
+                        document.getElementById('payload-active-notice').classList.remove('hidden');
+                    } catch (e) {
+                        console.error('Failed to apply saved payload:', e);
+                    }
+                }
+                
+                displayTestSuite(currentSuite);
                 updateSelectionCount();
                 
             } catch (error) {
@@ -802,6 +968,7 @@ HTML_TEMPLATE = """
                 uploadError.classList.remove('hidden');
             }
         }
+        
         
         function displayTestSuite(suite, showResults = false) {
             // Display metadata
@@ -1641,6 +1808,1007 @@ def download_log(execution_id):
         as_attachment=True,
         download_name=f"execution_{execution_id}.json"
     )
+
+
+# =============================================================================
+# Payment Builder API Endpoints
+# =============================================================================
+
+@app.route('/api/payment-schema')
+def get_payment_schema():
+    """Return the Create Payment API schema for form generation."""
+    try:
+        schema_data = schema_to_json(CreatePaymentRequest)
+        return jsonify(schema_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/validate-payment', methods=['POST'])
+def validate_payment():
+    """Validate a payment payload against the schema."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'valid': False, 'errors': ['No data provided']}), 400
+        
+        # Validate using Pydantic
+        payment = CreatePaymentRequest(**data)
+        return jsonify({
+            'valid': True,
+            'normalized': payment.model_dump(exclude_none=True)
+        })
+    except Exception as e:
+        # Extract validation errors
+        error_msg = str(e)
+        return jsonify({
+            'valid': False,
+            'errors': [error_msg]
+        }), 400
+
+
+@app.route('/api/presets')
+def get_payment_presets():
+    """Return available payment presets/templates."""
+    try:
+        presets = get_presets()
+        return jsonify({'presets': presets})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/builder')
+def payment_builder():
+    """Serve the Payment Request Builder page."""
+    return render_template_string(BUILDER_TEMPLATE)
+
+
+# Payment Builder HTML Template
+BUILDER_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MATRIX - Payment Builder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 8px;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+        
+        .nav-link {
+            color: #4f46e5;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        
+        .builder-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        
+        @media (max-width: 900px) {
+            .builder-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        
+        .card h2 {
+            font-size: 1.1rem;
+            color: #1a1a2e;
+            margin-bottom: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .card h2 .badge {
+            background: #4f46e5;
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+        
+        /* Field Groups */
+        .field-group {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        
+        .field-group-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: #f9fafb;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .field-group-header:hover {
+            background: #f3f4f6;
+        }
+        
+        .field-group-header .expand-icon {
+            font-size: 0.8rem;
+            color: #666;
+            transition: transform 0.2s;
+        }
+        
+        .field-group.expanded .field-group-header .expand-icon {
+            transform: rotate(90deg);
+        }
+        
+        .field-group-title {
+            font-weight: 600;
+            color: #1a1a2e;
+            flex: 1;
+        }
+        
+        .field-group-badge {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #e5e7eb;
+            color: #666;
+        }
+        
+        .field-group-badge.required {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .field-group-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        
+        .field-group.expanded .field-group-content {
+            max-height: 2000px;
+        }
+        
+        .field-group-inner {
+            padding: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        /* Fields */
+        .field-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .field-row:last-child {
+            border-bottom: none;
+        }
+        
+        .field-checkbox {
+            flex-shrink: 0;
+            padding-top: 2px;
+        }
+        
+        .field-checkbox input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #4f46e5;
+        }
+        
+        .field-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .field-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        
+        .field-label-text {
+            font-weight: 500;
+            color: #1a1a2e;
+            font-size: 0.9rem;
+        }
+        
+        .field-label .required-star {
+            color: #dc2626;
+            font-weight: bold;
+        }
+        
+        .field-label .field-type {
+            font-size: 0.75rem;
+            color: #888;
+            font-family: monospace;
+        }
+        
+        .field-description {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
+        .field-input {
+            width: 100%;
+        }
+        
+        .field-input input,
+        .field-input select,
+        .field-input textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-family: inherit;
+        }
+        
+        .field-input input:focus,
+        .field-input select:focus,
+        .field-input textarea:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+        
+        .field-input input:disabled,
+        .field-input select:disabled {
+            background: #f9fafb;
+            color: #9ca3af;
+        }
+        
+        .field-input input.invalid {
+            border-color: #dc2626;
+        }
+        
+        /* Nested Fields */
+        .nested-fields {
+            margin-left: 24px;
+            padding-left: 16px;
+            border-left: 2px solid #e5e7eb;
+            margin-top: 12px;
+        }
+        
+        .nested-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 0;
+            cursor: pointer;
+            color: #4f46e5;
+            font-size: 0.85rem;
+            user-select: none;
+        }
+        
+        .nested-toggle:hover {
+            text-decoration: underline;
+        }
+        
+        /* Preview Panel */
+        .preview-panel {
+            position: sticky;
+            top: 20px;
+        }
+        
+        .json-preview {
+            background: #1a1a2e;
+            color: #a5f3fc;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        /* Actions */
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 500;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #4f46e5;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #4338ca;
+        }
+        
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #333;
+        }
+        
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+        
+        .btn-success {
+            background: #059669;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #047857;
+        }
+        
+        /* Tab Navigation */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: #f3f4f6;
+            padding: 4px;
+            border-radius: 8px;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 10px 16px;
+            text-align: center;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            color: #333;
+        }
+        
+        .tab.active {
+            background: white;
+            color: #4f46e5;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* JSON Input */
+        .json-input {
+            width: 100%;
+            min-height: 400px;
+            padding: 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            resize: vertical;
+        }
+        
+        .json-input:focus {
+            outline: none;
+            border-color: #4f46e5;
+        }
+        
+        /* Validation Message */
+        .validation-msg {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+            display: none;
+        }
+        
+        .validation-msg.success {
+            display: block;
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .validation-msg.error {
+            display: block;
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Payment Request Builder</h1>
+            <p class="subtitle">Build and validate Create Payment API requests</p>
+            <p style="margin-top: 8px;"><a href="/" class="nav-link">← Back to Test Runner</a></p>
+        </header>
+        
+        <!-- Presets Section -->
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 16px; background: #f9fafb; border-radius: 8px;">
+            <label style="font-weight: 500; color: #1a1a2e; white-space: nowrap;">Load Preset:</label>
+            <select id="preset-select" onchange="applySelectedPreset()" style="flex: 1; max-width: 300px; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; background: white;">
+                <option value="">-- Select a preset --</option>
+            </select>
+            <span id="preset-description" style="color: #666; font-size: 0.85rem; flex: 1;"></span>
+        </div>
+        
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('interactive')">Interactive Form</div>
+            <div class="tab" onclick="switchTab('json')">Paste JSON</div>
+        </div>
+        
+        <div class="builder-layout">
+            <!-- Form Panel -->
+            <div class="form-panel">
+                <!-- Interactive Form Tab -->
+                <div id="tab-interactive" class="tab-content active">
+                    <div class="card">
+                        <h2>Build Payment Request</h2>
+                        <div id="form-loading" class="loading">
+                            <div class="spinner"></div>
+                            <p style="margin-top: 12px;">Loading schema...</p>
+                        </div>
+                        <div id="form-container" style="display: none;"></div>
+                    </div>
+                </div>
+                
+                <!-- JSON Paste Tab -->
+                <div id="tab-json" class="tab-content">
+                    <div class="card">
+                        <h2>Paste JSON Payload</h2>
+                        <textarea id="json-input" class="json-input" placeholder="Paste your JSON payment request here..."></textarea>
+                        <div class="actions">
+                            <button class="btn btn-primary" onclick="parseJsonInput()">Parse & Validate</button>
+                            <button class="btn btn-secondary" onclick="formatJson()">Format JSON</button>
+                        </div>
+                        <div id="json-validation" class="validation-msg"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Preview Panel -->
+            <div class="preview-panel">
+                <div class="card">
+                    <h2>JSON Preview <span class="badge">Live</span></h2>
+                    <div id="json-preview" class="json-preview">{}</div>
+                    <div class="actions">
+                        <button class="btn btn-primary" onclick="copyToClipboard()">Copy JSON</button>
+                        <button class="btn btn-success" onclick="usePayload()">Use This Payload</button>
+                    </div>
+                    <div id="preview-validation" class="validation-msg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let schema = null;
+        let presets = [];
+        let fieldValues = {};
+        let enabledFields = new Set();
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSchema();
+            loadPresets();
+        });
+        
+        async function loadSchema() {
+            try {
+                const response = await fetch('/api/payment-schema');
+                schema = await response.json();
+                renderForm();
+            } catch (error) {
+                document.getElementById('form-loading').innerHTML = 
+                    '<p style="color: #dc2626;">Failed to load schema: ' + error.message + '</p>';
+            }
+        }
+        
+        async function loadPresets() {
+            try {
+                const response = await fetch('/api/presets');
+                const data = await response.json();
+                presets = data.presets || [];
+                renderPresets();
+            } catch (error) {
+                document.getElementById('presets-loading').innerHTML = 
+                    '<p style="color: #888;">Failed to load presets</p>';
+            }
+        }
+        
+        function renderPresets() {
+            const select = document.getElementById('preset-select');
+            
+            if (presets.length === 0) {
+                select.innerHTML = '<option value="">No presets available</option>';
+            } else {
+                const categoryIcons = {
+                    'card': '💳',
+                    'pix': '⚡',
+                    'boleto': '📄',
+                    'bank_transfer': '🏦'
+                };
+                
+                const flags = {
+                    'BR': '🇧🇷',
+                    'MX': '🇲🇽',
+                    'CO': '🇨🇴',
+                    'CL': '🇨🇱',
+                    'PE': '🇵🇪',
+                    'AR': '🇦🇷',
+                    'US': '🇺🇸'
+                };
+                
+                select.innerHTML = '<option value="">-- Select a preset --</option>' + 
+                    presets.map(preset => {
+                        const icon = categoryIcons[preset.category] || '📦';
+                        const flag = flags[preset.country] || '🌎';
+                        return `<option value="${preset.id}">${flag} ${preset.name}</option>`;
+                    }).join('');
+            }
+        }
+        
+        function applySelectedPreset() {
+            const select = document.getElementById('preset-select');
+            const descSpan = document.getElementById('preset-description');
+            const presetId = select.value;
+            
+            if (!presetId) {
+                descSpan.textContent = '';
+                return;
+            }
+            
+            const preset = presets.find(p => p.id === presetId);
+            if (preset) {
+                descSpan.textContent = preset.description;
+                applyPreset(presetId);
+            }
+        }
+        
+        function applyPreset(presetId) {
+            const preset = presets.find(p => p.id === presetId);
+            if (!preset) return;
+            
+            // Clear current values
+            fieldValues = {};
+            enabledFields = new Set();
+            
+            // Apply preset payload
+            applyPayloadToForm(preset.payload, '');
+            
+            // Update preview
+            updatePreview();
+            
+            // Show confirmation
+            const validation = document.getElementById('preview-validation');
+            validation.className = 'validation-msg success';
+            validation.textContent = `Applied preset: ${preset.name}`;
+            setTimeout(() => { validation.className = 'validation-msg'; }, 3000);
+        }
+        
+        function applyPayloadToForm(obj, prefix) {
+            for (const [key, value] of Object.entries(obj)) {
+                const path = prefix ? prefix + '.' + key : key;
+                
+                if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                    applyPayloadToForm(value, path);
+                } else if (value !== null && value !== undefined && value !== '') {
+                    fieldValues[path] = value;
+                    enabledFields.add(path);
+                    
+                    // Update input field and checkbox
+                    const fieldId = path.replace(/\\./g, '-');
+                    const input = document.getElementById('input-' + fieldId);
+                    const checkbox = document.getElementById('cb-' + fieldId);
+                    
+                    if (input) {
+                        if (input.type === 'checkbox') {
+                            input.checked = value;
+                        } else {
+                            input.value = value;
+                        }
+                    }
+                    if (checkbox) {
+                        checkbox.checked = true;
+                    }
+                }
+            }
+        }
+        
+        function renderForm() {
+            const container = document.getElementById('form-container');
+            const groups = schema.groups || [];
+            
+            let html = '';
+            
+            groups.forEach(group => {
+                const isExpanded = !group.collapsed;
+                const requiredBadge = group.required ? 
+                    '<span class="field-group-badge required">Required</span>' : 
+                    '<span class="field-group-badge">' + group.fields.length + ' fields</span>';
+                
+                html += `
+                    <div class="field-group ${isExpanded ? 'expanded' : ''}" id="group-${group.id}">
+                        <div class="field-group-header" onclick="toggleGroup('${group.id}')">
+                            <span class="expand-icon">▶</span>
+                            <span class="field-group-title">${group.label}</span>
+                            ${requiredBadge}
+                        </div>
+                        <div class="field-group-content">
+                            <div class="field-group-inner">
+                                ${renderFields(group.fields)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            document.getElementById('form-loading').style.display = 'none';
+            container.style.display = 'block';
+            
+            // Enable required fields by default
+            schema.schema.required_fields.forEach(path => {
+                enabledFields.add(path);
+                const checkbox = document.getElementById('cb-' + path.replace(/\\./g, '-'));
+                if (checkbox) checkbox.checked = true;
+            });
+            
+            // Load example values
+            if (schema.example) {
+                loadExampleValues(schema.example, '');
+            }
+            
+            updatePreview();
+        }
+        
+        function renderFields(fields, parentPath = '') {
+            let html = '';
+            
+            fields.forEach(field => {
+                const fullPath = parentPath ? parentPath + '.' + field.name : field.name;
+                const fieldId = fullPath.replace(/\\./g, '-');
+                const isRequired = field.required;
+                const hasChildren = field.children && field.children.length > 0;
+                
+                html += `
+                    <div class="field-row" data-path="${fullPath}">
+                        <div class="field-checkbox">
+                            <input type="checkbox" id="cb-${fieldId}" 
+                                   onchange="toggleField('${fullPath}')" 
+                                   ${isRequired ? 'checked' : ''}>
+                        </div>
+                        <div class="field-content">
+                            <div class="field-label">
+                                <span class="field-label-text">${field.label}</span>
+                                ${isRequired ? '<span class="required-star">*</span>' : ''}
+                                <span class="field-type">${field.type}</span>
+                            </div>
+                            ${field.description ? '<div class="field-description">' + field.description + '</div>' : ''}
+                            ${renderFieldInput(field, fullPath, fieldId)}
+                            ${hasChildren ? renderNestedFields(field, fullPath) : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            return html;
+        }
+        
+        function renderFieldInput(field, fullPath, fieldId) {
+            if (field.type === 'object' || (field.children && field.children.length > 0)) {
+                return ''; // Objects don't have direct inputs
+            }
+            
+            if (field.type === 'array') {
+                return '<div class="field-description" style="color: #4f46e5;">Array field - expand to add items</div>';
+            }
+            
+            let inputHtml = '<div class="field-input">';
+            
+            if (field.options && field.options.length > 0) {
+                // Select dropdown
+                inputHtml += `<select id="input-${fieldId}" onchange="updateFieldValue('${fullPath}', this.value)">
+                    <option value="">Select ${field.label}...</option>
+                    ${field.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                </select>`;
+            } else if (field.type === 'boolean') {
+                // Checkbox for boolean
+                inputHtml += `<label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="input-${fieldId}" 
+                           onchange="updateFieldValue('${fullPath}', this.checked)">
+                    <span>Enable</span>
+                </label>`;
+            } else if (field.type === 'number' || field.type === 'integer') {
+                // Number input
+                inputHtml += `<input type="number" id="input-${fieldId}" 
+                              placeholder="${field.placeholder || ''}"
+                              step="${field.type === 'integer' ? '1' : '0.01'}"
+                              onchange="updateFieldValue('${fullPath}', parseFloat(this.value))">`;
+            } else {
+                // Text input
+                const inputType = field.is_sensitive ? 'password' : 'text';
+                inputHtml += `<input type="${inputType}" id="input-${fieldId}" 
+                              placeholder="${field.placeholder || ''}"
+                              ${field.max_length ? 'maxlength="' + field.max_length + '"' : ''}
+                              onchange="updateFieldValue('${fullPath}', this.value)">`;
+            }
+            
+            inputHtml += '</div>';
+            return inputHtml;
+        }
+        
+        function renderNestedFields(field, parentPath) {
+            if (!field.children || field.children.length === 0) return '';
+            
+            return `
+                <div class="nested-fields">
+                    ${renderFields(field.children, parentPath)}
+                </div>
+            `;
+        }
+        
+        function toggleGroup(groupId) {
+            const group = document.getElementById('group-' + groupId);
+            if (group) {
+                group.classList.toggle('expanded');
+            }
+        }
+        
+        function toggleField(path) {
+            const fieldId = path.replace(/\\./g, '-');
+            const checkbox = document.getElementById('cb-' + fieldId);
+            
+            if (checkbox.checked) {
+                enabledFields.add(path);
+            } else {
+                enabledFields.delete(path);
+                delete fieldValues[path];
+            }
+            
+            updatePreview();
+        }
+        
+        function updateFieldValue(path, value) {
+            if (value === '' || value === null || value === undefined) {
+                delete fieldValues[path];
+            } else {
+                fieldValues[path] = value;
+                enabledFields.add(path);
+                
+                // Also check the checkbox
+                const fieldId = path.replace(/\\./g, '-');
+                const checkbox = document.getElementById('cb-' + fieldId);
+                if (checkbox) checkbox.checked = true;
+            }
+            
+            updatePreview();
+        }
+        
+        function loadExampleValues(obj, prefix) {
+            for (const [key, value] of Object.entries(obj)) {
+                const path = prefix ? prefix + '.' + key : key;
+                
+                if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                    loadExampleValues(value, path);
+                } else {
+                    fieldValues[path] = value;
+                    
+                    // Update input field
+                    const fieldId = path.replace(/\\./g, '-');
+                    const input = document.getElementById('input-' + fieldId);
+                    if (input) {
+                        if (input.type === 'checkbox') {
+                            input.checked = value;
+                        } else {
+                            input.value = value;
+                        }
+                    }
+                }
+            }
+        }
+        
+        function buildPayload() {
+            const payload = {};
+            
+            for (const path of enabledFields) {
+                const value = fieldValues[path];
+                if (value !== undefined && value !== null && value !== '') {
+                    setNestedValue(payload, path, value);
+                }
+            }
+            
+            return payload;
+        }
+        
+        function setNestedValue(obj, path, value) {
+            const parts = path.split('.');
+            let current = obj;
+            
+            for (let i = 0; i < parts.length - 1; i++) {
+                const part = parts[i];
+                if (!(part in current)) {
+                    current[part] = {};
+                }
+                current = current[part];
+            }
+            
+            current[parts[parts.length - 1]] = value;
+        }
+        
+        function updatePreview() {
+            const payload = buildPayload();
+            const preview = document.getElementById('json-preview');
+            preview.textContent = JSON.stringify(payload, null, 2);
+        }
+        
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            document.querySelector(`.tab:nth-child(${tab === 'interactive' ? 1 : 2})`).classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+        }
+        
+        function parseJsonInput() {
+            const input = document.getElementById('json-input');
+            const validation = document.getElementById('json-validation');
+            
+            try {
+                const parsed = JSON.parse(input.value);
+                
+                // Validate against API
+                fetch('/api/validate-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(parsed)
+                })
+                .then(res => res.json())
+                .then(result => {
+                    if (result.valid) {
+                        validation.className = 'validation-msg success';
+                        validation.textContent = 'Valid payment request!';
+                        document.getElementById('json-preview').textContent = 
+                            JSON.stringify(result.normalized, null, 2);
+                    } else {
+                        validation.className = 'validation-msg error';
+                        validation.textContent = 'Validation error: ' + result.errors.join(', ');
+                    }
+                });
+            } catch (e) {
+                validation.className = 'validation-msg error';
+                validation.textContent = 'Invalid JSON: ' + e.message;
+            }
+        }
+        
+        function formatJson() {
+            const input = document.getElementById('json-input');
+            try {
+                const parsed = JSON.parse(input.value);
+                input.value = JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                alert('Cannot format invalid JSON');
+            }
+        }
+        
+        function copyToClipboard() {
+            const preview = document.getElementById('json-preview');
+            navigator.clipboard.writeText(preview.textContent).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+        
+        function usePayload() {
+            // Get payload from the JSON preview (works for both interactive form and pasted JSON)
+            const previewContent = document.getElementById('json-preview').textContent;
+            
+            try {
+                // Validate it's proper JSON
+                const payload = JSON.parse(previewContent);
+                
+                // Store in sessionStorage for use in test runner
+                sessionStorage.setItem('payment_payload', JSON.stringify(payload));
+                
+                const validation = document.getElementById('preview-validation');
+                validation.className = 'validation-msg success';
+                validation.textContent = 'Payload saved! You can now use it in the Test Runner.';
+            } catch (e) {
+                const validation = document.getElementById('preview-validation');
+                validation.className = 'validation-msg error';
+                validation.textContent = 'Cannot save: Invalid JSON in preview';
+            }
+        }
+    </script>
+</body>
+</html>
+"""
 
 if __name__ == '__main__':
     print("\n" + "="*60)
