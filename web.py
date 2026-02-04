@@ -584,6 +584,62 @@ HTML_TEMPLATE = """
             border: 1px solid #10b981;
         }
         
+        .quick-info {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .quick-info-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+        }
+        
+        .quick-info-label {
+            color: #6b7280;
+            min-width: 80px;
+            font-weight: 500;
+        }
+        
+        .quick-info-value {
+            font-family: monospace;
+            color: #1f2937;
+            background: #f3f4f6;
+            padding: 4px 8px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        
+        .copy-btn {
+            background: none;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            color: #6b7280;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+        
+        .copy-btn:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+            color: #374151;
+        }
+        
+        .copy-btn.copied {
+            background: #d1fae5;
+            border-color: #10b981;
+            color: #059669;
+        }
+        
         .response-status-row {
             display: flex;
             align-items: center;
@@ -1340,25 +1396,27 @@ HTML_TEMPLATE = """
                        </div>` 
                     : '';
                 
-                let captureVarsHtml = '';
-                if (stepResult?.captured_variables && Object.keys(stepResult.captured_variables).length > 0) {
-                    captureVarsHtml = `<div class="step-section">
-                        <div class="step-section-label">Captured Values</div>
-                        <div class="capture-vars">
-                            ${Object.entries(stepResult.captured_variables).map(([name, value]) => 
-                                `<span class="capture-var captured">${name} = ${JSON.stringify(value)}</span>`
-                            ).join('')}
-                        </div>
-                    </div>`;
-                } else if (step.capture_variables && Object.keys(step.capture_variables).length > 0) {
-                    captureVarsHtml = `<div class="step-section">
-                        <div class="step-section-label">Variables to Capture</div>
-                        <div class="capture-vars">
-                            ${Object.entries(step.capture_variables).map(([name, path]) => 
-                                `<span class="capture-var">${name} ← ${path}</span>`
-                            ).join('')}
-                        </div>
-                    </div>`;
+                // Build quick info section with payment_id and x-trace-id
+                let quickInfoHtml = '';
+                const paymentId = stepResult?.response_body?.id;
+                const xTraceId = stepResult?.response_headers?.['x-trace-id'];
+                if (paymentId || xTraceId) {
+                    let items = '';
+                    if (paymentId) {
+                        items += `<div class="quick-info-item">
+                            <span class="quick-info-label">Payment ID</span>
+                            <span class="quick-info-value">${paymentId}</span>
+                            <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${paymentId}', this)">Copy</button>
+                        </div>`;
+                    }
+                    if (xTraceId) {
+                        items += `<div class="quick-info-item">
+                            <span class="quick-info-label">X-Trace-ID</span>
+                            <span class="quick-info-value">${xTraceId}</span>
+                            <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${xTraceId}', this)">Copy</button>
+                        </div>`;
+                    }
+                    quickInfoHtml = `<div class="quick-info">${items}</div>`;
                 }
                 
                 const errorHtml = stepResult?.error_message 
@@ -1377,12 +1435,8 @@ HTML_TEMPLATE = """
                         <div class="step-detail-body">
                             ${requestHtml}
                             ${responseStatusHtml}
+                            ${quickInfoHtml}
                             ${responseHtml}
-                            ${captureVarsHtml}
-                            ${step.expected_status ? `<div class="step-section">
-                                <div class="step-section-label">Expected Status</div>
-                                <span style="color:#059669;font-weight:500">${step.expected_status}</span>
-                            </div>` : ''}
                             ${errorHtml}
                         </div>
                     </div>
@@ -1537,28 +1591,27 @@ HTML_TEMPLATE = """
                            </div>` 
                         : '';
                     
-                    // Show captured values if we have results, otherwise show the JSONPath specs
-                    let captureVarsHtml = '';
-                    if (stepResult?.captured_variables && Object.keys(stepResult.captured_variables).length > 0) {
-                        // Show actual captured values after execution
-                        captureVarsHtml = `<div class="step-section">
-                            <div class="step-section-label">Captured Values</div>
-                            <div class="capture-vars">
-                                ${Object.entries(stepResult.captured_variables).map(([name, value]) => 
-                                    `<span class="capture-var captured">${name} = ${JSON.stringify(value)}</span>`
-                                ).join('')}
-                            </div>
-                        </div>`;
-                    } else if (step.capture_variables && Object.keys(step.capture_variables).length > 0) {
-                        // Show JSONPath specs before execution
-                        captureVarsHtml = `<div class="step-section">
-                            <div class="step-section-label">Variables to Capture</div>
-                            <div class="capture-vars">
-                                ${Object.entries(step.capture_variables).map(([name, path]) => 
-                                    `<span class="capture-var">${name} ← ${path}</span>`
-                                ).join('')}
-                            </div>
-                        </div>`;
+                    // Build quick info section with payment_id and x-trace-id
+                    let quickInfoHtml = '';
+                    const paymentId = stepResult?.response_body?.id;
+                    const xTraceId = stepResult?.response_headers?.['x-trace-id'];
+                    if (paymentId || xTraceId) {
+                        let items = '';
+                        if (paymentId) {
+                            items += `<div class="quick-info-item">
+                                <span class="quick-info-label">Payment ID</span>
+                                <span class="quick-info-value">${paymentId}</span>
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${paymentId}', this)">Copy</button>
+                            </div>`;
+                        }
+                        if (xTraceId) {
+                            items += `<div class="quick-info-item">
+                                <span class="quick-info-label">X-Trace-ID</span>
+                                <span class="quick-info-value">${xTraceId}</span>
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${xTraceId}', this)">Copy</button>
+                            </div>`;
+                        }
+                        quickInfoHtml = `<div class="quick-info">${items}</div>`;
                     }
                     
                     const errorHtml = stepResult?.error_message 
@@ -1577,12 +1630,8 @@ HTML_TEMPLATE = """
                             <div class="step-detail-body">
                                 ${requestHtml}
                                 ${responseStatusHtml}
+                                ${quickInfoHtml}
                                 ${responseHtml}
-                                ${captureVarsHtml}
-                                ${step.expected_status ? `<div class="step-section">
-                                    <div class="step-section-label">Expected Status</div>
-                                    <span style="color:#059669;font-weight:500">${step.expected_status}</span>
-                                </div>` : ''}
                                 ${errorHtml}
                             </div>
                         </div>
@@ -1634,6 +1683,18 @@ HTML_TEMPLATE = """
             if (element) {
                 element.classList.toggle('expanded');
             }
+        }
+        
+        function copyValue(value, btn) {
+            navigator.clipboard.writeText(value).then(() => {
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '✓ Copied';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('copied');
+                }, 1500);
+            });
         }
         
         function toggleHierarchyGroup(groupId) {
@@ -1951,42 +2012,40 @@ HTML_TEMPLATE = """
                             }
                         }
                         
-                        // Update captured variables section with actual values
-                        if (stepResult.captured_variables && Object.keys(stepResult.captured_variables).length > 0) {
+                        // Update quick info section with payment_id and x-trace-id
+                        const paymentId = stepResult.response_body?.id;
+                        const xTraceId = stepResult.response_headers?.['x-trace-id'];
+                        if (paymentId || xTraceId) {
                             const bodyEl = stepEl.querySelector('.step-detail-body');
-                            // Find existing capture vars section or create new one
-                            let captureSection = bodyEl.querySelector('.step-section:has(.capture-vars)');
-                            if (!captureSection) {
-                                // Find the section by label text as fallback
-                                const sections = bodyEl.querySelectorAll('.step-section');
-                                sections.forEach(s => {
-                                    const label = s.querySelector('.step-section-label');
-                                    if (label && (label.textContent.includes('Capture') || label.textContent.includes('Variables'))) {
-                                        captureSection = s;
-                                    }
-                                });
+                            // Check if quick-info section already exists
+                            let quickInfoSection = bodyEl.querySelector('.quick-info');
+                            
+                            let items = '';
+                            if (paymentId) {
+                                items += `<div class="quick-info-item">
+                                    <span class="quick-info-label">Payment ID</span>
+                                    <span class="quick-info-value">${paymentId}</span>
+                                    <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${paymentId}', this)">Copy</button>
+                                </div>`;
                             }
+                            if (xTraceId) {
+                                items += `<div class="quick-info-item">
+                                    <span class="quick-info-label">X-Trace-ID</span>
+                                    <span class="quick-info-value">${xTraceId}</span>
+                                    <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${xTraceId}', this)">Copy</button>
+                                </div>`;
+                            }
+                            const quickInfoHtml = `<div class="quick-info">${items}</div>`;
                             
-                            const capturedHtml = `
-                                <div class="step-section">
-                                    <div class="step-section-label">Captured Values</div>
-                                    <div class="capture-vars">
-                                        ${Object.entries(stepResult.captured_variables).map(([name, value]) => 
-                                            `<span class="capture-var captured">${name} = ${JSON.stringify(value)}</span>`
-                                        ).join('')}
-                                    </div>
-                                </div>
-                            `;
-                            
-                            if (captureSection) {
-                                captureSection.outerHTML = capturedHtml;
+                            if (quickInfoSection) {
+                                quickInfoSection.outerHTML = quickInfoHtml;
                             } else {
-                                // Insert before expected status or at end
-                                const expectedSection = bodyEl.querySelector('.step-section:last-child');
-                                if (expectedSection) {
-                                    expectedSection.insertAdjacentHTML('beforebegin', capturedHtml);
+                                // Insert after response status section or at end
+                                const statusSection = bodyEl.querySelector('.response-status-section');
+                                if (statusSection) {
+                                    statusSection.insertAdjacentHTML('afterend', quickInfoHtml);
                                 } else {
-                                    bodyEl.insertAdjacentHTML('beforeend', capturedHtml);
+                                    bodyEl.insertAdjacentHTML('beforeend', quickInfoHtml);
                                 }
                             }
                         }
@@ -2544,7 +2603,8 @@ def execute_stream():
                         'response_status': s.response.body.get('status') if s.response and s.response.body else None,
                         'response_substatus': s.response.body.get('sub_status') if s.response and s.response.body else None,
                         'http_status_code': s.response.status_code if s.response else None,
-                        'response_body': s.response.body if s.response else None
+                        'response_body': s.response.body if s.response else None,
+                        'response_headers': s.response.headers if s.response else None
                     }
                     print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - response attached: {s.response is not None}{Style.RESET_ALL}")
                     print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - response_body being sent: {step_data['response_body']}{Style.RESET_ALL}")
@@ -3565,6 +3625,18 @@ BUILDER_TEMPLATE = """
             const preview = document.getElementById('json-preview');
             navigator.clipboard.writeText(preview.textContent).then(() => {
                 alert('Copied to clipboard!');
+            });
+        }
+        
+        function copyValue(value, btn) {
+            navigator.clipboard.writeText(value).then(() => {
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '✓ Copied';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('copied');
+                }, 1500);
             });
         }
         
