@@ -2406,16 +2406,16 @@ def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
         # Substitute variables in input data
         substituted_data = context.substitute_variables(step.input_data)
         
-        # Create API request
-        base_url = api_client.config.api.base_urls.get(step.provider, "https://api.example.com")
+        # Execute API call first to get the actual URL
+        print(f"{Fore.YELLOW}[DEBUG] Making API call for operation: {step.operation}{Style.RESET_ALL}")
+        response = api_client.execute_operation(step.operation, step.provider, substituted_data)
+        
+        # Create API request object for logging using the actual URL from the response
+        actual_url = response.request_url or f"{api_client.yuno_base_url}/payments"
         request_obj = APIRequest(
-            method="POST", url=f"{base_url}/{step.operation}",
+            method="POST", url=actual_url,
             headers={"Content-Type": "application/json"}, body=substituted_data
         )
-        
-        # Execute API call
-        print(f"{Fore.YELLOW}[DEBUG] Making API call to: {api_client.yuno_base_url}/payments{Style.RESET_ALL}")
-        response = api_client.execute_operation(step.operation, step.provider, substituted_data)
         
         print(f"{Fore.BLUE}[DEBUG] API Response Status Code: {response.status_code}{Style.RESET_ALL}")
         print(f"{Fore.BLUE}[DEBUG] API Response Body: {json.dumps(response.body, indent=2) if response.body else 'None'}{Style.RESET_ALL}")

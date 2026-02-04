@@ -115,6 +115,7 @@ class APIResponse(BaseModel):
     body: Dict[str, Any] = Field(default_factory=dict, description="Response body")
     duration_ms: Optional[int] = Field(default=None, description="Response time in milliseconds")
     error: Optional[str] = Field(default=None, description="Error message if request failed")
+    request_url: Optional[str] = Field(default=None, description="Actual URL that was called")
 
     @property
     def is_success(self) -> bool:

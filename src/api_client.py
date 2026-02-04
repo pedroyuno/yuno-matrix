@@ -163,7 +163,8 @@ class APIClient:
                 headers=dict(response.headers),
                 body=response_body,
                 duration_ms=duration_ms,
-                error=None if response.ok else f"HTTP {response.status_code}: {response.reason}"
+                error=None if response.ok else f"HTTP {response.status_code}: {response.reason}",
+                request_url=url
             )
 
         except requests.exceptions.Timeout:
@@ -171,14 +172,16 @@ class APIClient:
                 status_code=408,
                 headers={},
                 body={},
-                error="Request timeout"
+                error="Request timeout",
+                request_url=url
             )
         except requests.exceptions.RequestException as e:
             return APIResponse(
                 status_code=0,
                 headers={},
                 body={},
-                error=f"Request failed: {str(e)}"
+                error=f"Request failed: {str(e)}",
+                request_url=url
             )
 
     def payment(self, provider: str, data: Dict[str, Any]) -> APIResponse:
@@ -348,16 +351,20 @@ class APIClient:
         Returns:
             Capture response
         """
+        payment_id = data.get("payment_id")
+        transaction_id = data.get("transaction_id")
+        
+        # Build the expected URL even for error cases
+        capture_url = f"{self.yuno_base_url}/payments/{payment_id or '{payment_id}'}/transactions/{transaction_id or '{transaction_id}'}/capture"
+        
         if not self.placeholder_mode:
-            payment_id = data.get("payment_id")
-            transaction_id = data.get("transaction_id")
-
             if not payment_id:
                 return APIResponse(
                     status_code=400,
                     headers={},
                     body={"error": "payment_id is required for capture"},
-                    error="payment_id is required for capture"
+                    error="payment_id is required for capture",
+                    request_url=capture_url
                 )
 
             if not transaction_id:
@@ -365,7 +372,8 @@ class APIClient:
                     status_code=400,
                     headers={},
                     body={"error": "transaction_id is required for capture"},
-                    error="transaction_id is required for capture"
+                    error="transaction_id is required for capture",
+                    request_url=capture_url
                 )
 
             # Build capture request body per Yuno API spec
@@ -386,8 +394,8 @@ class APIClient:
             )
 
         # Placeholder mode
-        mock_transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
-        mock_payment_id = data.get("payment_id", f"pay_{uuid.uuid4().hex[:16]}")
+        mock_transaction_id = transaction_id or f"txn_{uuid.uuid4().hex[:12]}"
+        mock_payment_id = payment_id or f"pay_{uuid.uuid4().hex[:16]}"
 
         return APIResponse(
             status_code=200,
@@ -410,7 +418,8 @@ class APIClient:
                 },
                 "provider": provider
             },
-            duration_ms=120
+            duration_ms=120,
+            request_url=f"{self.yuno_base_url}/payments/{mock_payment_id}/transactions/{mock_transaction_id}/capture"
         )
 
     def purchase(self, provider: str, data: Dict[str, Any]) -> APIResponse:
@@ -478,16 +487,20 @@ class APIClient:
         Returns:
             Refund response
         """
+        payment_id = data.get("payment_id")
+        transaction_id = data.get("transaction_id")
+        
+        # Build the expected URL even for error cases
+        refund_url = f"{self.yuno_base_url}/payments/{payment_id or '{payment_id}'}/transactions/{transaction_id or '{transaction_id}'}/refund"
+        
         if not self.placeholder_mode:
-            payment_id = data.get("payment_id")
-            transaction_id = data.get("transaction_id")
-
             if not payment_id:
                 return APIResponse(
                     status_code=400,
                     headers={},
                     body={"error": "payment_id is required for refund"},
-                    error="payment_id is required for refund"
+                    error="payment_id is required for refund",
+                    request_url=refund_url
                 )
 
             if not transaction_id:
@@ -495,7 +508,8 @@ class APIClient:
                     status_code=400,
                     headers={},
                     body={"error": "transaction_id is required for refund"},
-                    error="transaction_id is required for refund"
+                    error="transaction_id is required for refund",
+                    request_url=refund_url
                 )
 
             # Build refund request body per Yuno API spec
@@ -523,8 +537,8 @@ class APIClient:
             )
 
         # Placeholder mode
-        mock_transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
-        mock_payment_id = data.get("payment_id", f"pay_{uuid.uuid4().hex[:16]}")
+        mock_transaction_id = transaction_id or f"txn_{uuid.uuid4().hex[:12]}"
+        mock_payment_id = payment_id or f"pay_{uuid.uuid4().hex[:16]}"
         refund_id = f"ref_{uuid.uuid4().hex[:12]}"
 
         # Determine if partial or full refund based on amount presence
@@ -561,7 +575,8 @@ class APIClient:
                 "updated_at": datetime.utcnow().isoformat() + "Z",
                 "provider": provider
             },
-            duration_ms=160
+            duration_ms=160,
+            request_url=f"{self.yuno_base_url}/payments/{mock_payment_id}/transactions/{mock_transaction_id}/refund"
         )
 
     def cancel(self, provider: str, data: Dict[str, Any]) -> APIResponse:
@@ -583,16 +598,20 @@ class APIClient:
         Returns:
             Cancel response
         """
+        payment_id = data.get("payment_id")
+        transaction_id = data.get("transaction_id")
+        
+        # Build the expected URL even for error cases
+        cancel_url = f"{self.yuno_base_url}/payments/{payment_id or '{payment_id}'}/transactions/{transaction_id or '{transaction_id}'}/cancel"
+        
         if not self.placeholder_mode:
-            payment_id = data.get("payment_id")
-            transaction_id = data.get("transaction_id")
-
             if not payment_id:
                 return APIResponse(
                     status_code=400,
                     headers={},
                     body={"error": "payment_id is required for cancel"},
-                    error="payment_id is required for cancel"
+                    error="payment_id is required for cancel",
+                    request_url=cancel_url
                 )
 
             if not transaction_id:
@@ -600,7 +619,8 @@ class APIClient:
                     status_code=400,
                     headers={},
                     body={"error": "transaction_id is required for cancel"},
-                    error="transaction_id is required for cancel"
+                    error="transaction_id is required for cancel",
+                    request_url=cancel_url
                 )
 
             # Build cancel request body per Yuno API spec
@@ -624,8 +644,8 @@ class APIClient:
             )
 
         # Placeholder mode
-        mock_transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
-        mock_payment_id = data.get("payment_id", f"pay_{uuid.uuid4().hex[:16]}")
+        mock_transaction_id = transaction_id or f"txn_{uuid.uuid4().hex[:12]}"
+        mock_payment_id = payment_id or f"pay_{uuid.uuid4().hex[:16]}"
         cancel_id = f"cnl_{uuid.uuid4().hex[:12]}"
 
         return APIResponse(
@@ -649,7 +669,8 @@ class APIClient:
                 },
                 "provider": provider
             },
-            duration_ms=100
+            duration_ms=100,
+            request_url=f"{self.yuno_base_url}/payments/{mock_payment_id}/transactions/{mock_transaction_id}/cancel"
         )
 
     def void(self, provider: str, data: Dict[str, Any]) -> APIResponse:

@@ -352,17 +352,33 @@ class TestCaseGenerator:
         # Operations that reference previous step results
         if operation in ('capture', 'refund', 'cancel'):
             var_prefix = integration.integration_id.lower().replace('_', '')
-            input_data["payment_id"] = f"${{{var_prefix}_payment_id}}"
             
-            # For refund, may need transaction_id
-            if operation == 'refund':
-                input_data["transaction_id"] = f"${{{var_prefix}_transaction_id}}"
+            # Base data for post-authorization operations
+            post_auth_input: Dict[str, Any] = {
+                "payment_id": f"${{{var_prefix}_payment_id}}",
+                "transaction_id": f"${{{var_prefix}_transaction_id}}",
+                "merchant_reference": f"{operation}_{integration.integration_id.lower()}_{step_id:03d}"
+            }
             
-            # Refund might need amount
-            if operation == 'refund':
-                input_data["amount"] = {"currency": currency, "value": amount}
+            if operation == 'capture':
+                # Capture requires: merchant_reference, reason, amount
+                post_auth_input["reason"] = "PRODUCT_CONFIRMED"
+                post_auth_input["amount"] = {
+                    "currency": f"${{{var_prefix}_amount_currency}}",
+                    "value": f"${{{var_prefix}_amount_value}}"
+                }
+            elif operation == 'refund':
+                # Refund requires: merchant_reference, reason, amount (optional for full refund)
+                post_auth_input["reason"] = "REQUESTED_BY_CUSTOMER"
+                post_auth_input["amount"] = {
+                    "currency": f"${{{var_prefix}_amount_currency}}",
+                    "value": f"${{{var_prefix}_amount_value}}"
+                }
+            elif operation == 'cancel':
+                # Cancel requires: merchant_reference, reason
+                post_auth_input["reason"] = "REQUESTED_BY_CUSTOMER"
             
-            return input_data
+            return post_auth_input
         
         # Add customer data for payment operations
         input_data["customer_payer"] = self._get_customer_data(country)
@@ -463,7 +479,9 @@ class TestCaseGenerator:
         return {
             f"{prefix}_payment_id": "$.body.id",
             f"{prefix}_transaction_id": "$.body.transactions.id",
-            f"{prefix}_status": "$.body.status"
+            f"{prefix}_status": "$.body.status",
+            f"{prefix}_amount_value": "$.body.amount.value",
+            f"{prefix}_amount_currency": "$.body.amount.currency"
         }
     
     def generate_single_operation_test(

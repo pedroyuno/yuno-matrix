@@ -99,15 +99,15 @@ class TestExecutor:
             # Substitute variables in input data
             substituted_data = self.context.substitute_variables(step.input_data)
             
-            # Create API request
-            base_url = self.api_client.config.api.base_urls.get(step.provider, "https://api.example.com")
+            # Execute API call first to get the actual URL
+            response = self.api_client.execute_operation(step.operation, step.provider, substituted_data)
+            
+            # Create API request object for logging using the actual URL from the response
+            actual_url = response.request_url or f"{self.api_client.yuno_base_url}/payments"
             request = APIRequest(
-                method="POST", url=f"{base_url}/{step.operation}",
+                method="POST", url=actual_url,
                 headers={"Content-Type": "application/json"}, body=substituted_data
             )
-            
-            # Execute API call
-            response = self.api_client.execute_operation(step.operation, step.provider, substituted_data)
             
             # Capture variables from response
             captured_vars = {}

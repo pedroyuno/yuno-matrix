@@ -114,9 +114,11 @@ class ExecutionContext:
         """
         Substitute variables in a string.
 
-        Supports:
-        - Full replacement: "{{var}}" -> value (preserves type)
-        - Partial replacement: "prefix_{{var}}_suffix" -> "prefix_value_suffix"
+        Supports both syntaxes:
+        - {{var}} - double curly braces
+        - ${var} - dollar sign with curly braces
+        
+        Full replacement preserves type, partial replacement converts to string.
 
         Args:
             text: String with potential variable placeholders
@@ -124,11 +126,12 @@ class ExecutionContext:
         Returns:
             Substituted value (may be non-string if full replacement)
         """
-        # Pattern to match {{variable_name}}
-        pattern = r'\{\{(\w+)\}\}'
+        # Patterns to match {{variable_name}} and ${variable_name}
+        pattern_double = r'\{\{(\w+)\}\}'
+        pattern_dollar = r'\$\{(\w+)\}'
 
-        # Check if entire string is a single variable reference
-        match = re.fullmatch(pattern, text)
+        # Check if entire string is a single variable reference (either syntax)
+        match = re.fullmatch(pattern_double, text) or re.fullmatch(pattern_dollar, text)
         if match:
             var_name = match.group(1)
             return self.get_variable(var_name)
@@ -139,7 +142,9 @@ class ExecutionContext:
             value = self.get_variable(var_name)
             return str(value)
 
-        result = re.sub(pattern, replace_var, text)
+        # Replace both syntaxes
+        result = re.sub(pattern_double, replace_var, text)
+        result = re.sub(pattern_dollar, replace_var, result)
         return result
 
     def extract_from_response(self, response: Dict[str, Any], jsonpath: str) -> Any:
