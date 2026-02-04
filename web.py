@@ -617,6 +617,11 @@ HTML_TEMPLATE = """
             font-family: monospace;
         }
         
+        .http-status-code.error {
+            color: #dc2626;
+            font-weight: 600;
+        }
+        
         .btn {
             display: inline-block;
             padding: 12px 24px;
@@ -1838,12 +1843,16 @@ HTML_TEMPLATE = """
             
             // Add duration
             const header = element.querySelector('.test-case-header');
-            let durationEl = header.querySelector('.test-case-duration');
-            if (!durationEl) {
-                const idEl = header.querySelector('.test-case-id');
-                idEl.insertAdjacentHTML('beforebegin', `<span class="test-case-duration">${tc.duration_ms}ms</span>`);
-            } else {
-                durationEl.textContent = `${tc.duration_ms}ms`;
+            if (header) {
+                let durationEl = header.querySelector('.test-case-duration');
+                if (!durationEl) {
+                    const idEl = header.querySelector('.test-case-id');
+                    if (idEl) {
+                        idEl.insertAdjacentHTML('beforebegin', `<span class="test-case-duration">${tc.duration_ms}ms</span>`);
+                    }
+                } else {
+                    durationEl.textContent = `${tc.duration_ms}ms`;
+                }
             }
             
             // Update step details with results
@@ -1851,46 +1860,68 @@ HTML_TEMPLATE = """
                 const stepDetails = element.querySelectorAll('.step-detail');
                 tc.steps.forEach(stepResult => {
                     const stepEl = stepDetails[stepResult.step_id - 1];
-                    if (stepEl) {
-                        stepEl.classList.remove('success', 'failure', 'error');
-                        stepEl.classList.add(stepResult.status);
-                        
-                        // Add result badge to header
-                        const headerEl = stepEl.querySelector('.step-detail-header');
-                        let badge = headerEl.querySelector('.step-result-badge');
-                        if (!badge) {
-                            headerEl.insertAdjacentHTML('beforeend', `
-                                <span class="step-result-badge ${stepResult.status}">${stepResult.status.toUpperCase()}</span>
-                                ${stepResult.duration_ms ? `<span style="color:#888;font-size:0.8rem;margin-left:8px">${stepResult.duration_ms}ms</span>` : ''}
-                            `);
-                        }
+                    if (!stepEl) {
+                        console.error('[DEBUG] stepEl not found for step_id', stepResult.step_id);
+                        return;
+                    }
+                    
+                    stepEl.classList.remove('success', 'failure', 'error');
+                    stepEl.classList.add(stepResult.status);
+                    
+                    // Add result badge to header
+                    const headerEl = stepEl.querySelector('.step-detail-header');
+                    if (!headerEl) {
+                        console.error('[DEBUG] headerEl not found for step', stepResult.step_id);
+                        return;
+                    }
+                    
+                    let badge = headerEl.querySelector('.step-result-badge');
+                    if (!badge) {
+                        headerEl.insertAdjacentHTML('beforeend', `
+                            <span class="step-result-badge ${stepResult.status}">${stepResult.status.toUpperCase()}</span>
+                            ${stepResult.duration_ms ? `<span style="color:#888;font-size:0.8rem;margin-left:8px">${stepResult.duration_ms}ms</span>` : ''}
+                        `);
+                    }
                         
                         // Add response status and body sections
+                        console.log('[DEBUG] Step', stepResult.step_id, 'response_status:', stepResult.response_status, 'response_body:', stepResult.response_body);
                         if (stepResult.response_status || stepResult.response_body) {
                             const bodyEl = stepEl.querySelector('.step-detail-body');
+                            console.log('[DEBUG] Step', stepResult.step_id, 'bodyEl found:', bodyEl !== null);
+                            
+                            if (!bodyEl) {
+                                console.error('[DEBUG] bodyEl not found for step', stepResult.step_id);
+                                return;
+                            }
                             
                             // Add response status row if not present
-                            if (stepResult.response_status && !bodyEl.querySelector('.response-status-row')) {
-                                const statusHtml = `
-                                    <div class="step-section response-status-section">
-                                        <div class="step-section-label">API Response</div>
-                                        <div class="response-status-row">
-                                            <span class="response-status-badge">${stepResult.response_status}</span>
-                                            ${stepResult.response_substatus ? `<span class="response-substatus-badge">${stepResult.response_substatus}</span>` : ''}
-                                            ${stepResult.http_status_code ? `<span class="http-status-code">HTTP ${stepResult.http_status_code}</span>` : ''}
+                            if (!bodyEl.querySelector('.response-status-row')) {
+                                // Show status section if we have response_status OR http_status_code
+                                if (stepResult.response_status || stepResult.http_status_code) {
+                                    const statusHtml = `
+                                        <div class="step-section response-status-section">
+                                            <div class="step-section-label">API Response</div>
+                                            <div class="response-status-row">
+                                                ${stepResult.response_status ? `<span class="response-status-badge">${stepResult.response_status}</span>` : ''}
+                                                ${stepResult.response_substatus ? `<span class="response-substatus-badge">${stepResult.response_substatus}</span>` : ''}
+                                                ${stepResult.http_status_code ? `<span class="http-status-code ${stepResult.http_status_code >= 400 ? 'error' : ''}"">HTTP ${stepResult.http_status_code}</span>` : ''}
+                                            </div>
                                         </div>
-                                    </div>
-                                `;
-                                const requestSection = bodyEl.querySelector('.collapsible-section');
-                                if (requestSection) {
-                                    requestSection.closest('.step-section').insertAdjacentHTML('afterend', statusHtml);
-                                } else {
-                                    bodyEl.insertAdjacentHTML('afterbegin', statusHtml);
+                                    `;
+                                    const requestStepSection = bodyEl.querySelector('.step-section');
+                                    if (requestStepSection) {
+                                        requestStepSection.insertAdjacentHTML('afterend', statusHtml);
+                                    } else {
+                                        bodyEl.insertAdjacentHTML('afterbegin', statusHtml);
+                                    }
+                                    console.log('[DEBUG] Added response status section');
                                 }
                             }
                             
                             // Add collapsible response body if not present
+                            console.log('[DEBUG] Step', stepResult.step_id, 'response_body exists:', !!stepResult.response_body, 'response-body-section exists:', !!bodyEl.querySelector('.response-body-section'));
                             if (stepResult.response_body && !bodyEl.querySelector('.response-body-section')) {
+                                console.log('[DEBUG] Adding response body section for step', stepResult.step_id);
                                 const responseBodyHtml = `
                                     <div class="step-section response-body-section">
                                         <div class="collapsible-section" onclick="this.classList.toggle('open')">
@@ -1905,15 +1936,17 @@ HTML_TEMPLATE = """
                                     </div>
                                 `;
                                 const statusSection = bodyEl.querySelector('.response-status-section');
+                                const requestStepSection = bodyEl.querySelector('.step-section');
+                                console.log('[DEBUG] statusSection:', !!statusSection, 'requestStepSection:', !!requestStepSection);
                                 if (statusSection) {
                                     statusSection.insertAdjacentHTML('afterend', responseBodyHtml);
+                                    console.log('[DEBUG] Inserted after statusSection');
+                                } else if (requestStepSection) {
+                                    requestStepSection.insertAdjacentHTML('afterend', responseBodyHtml);
+                                    console.log('[DEBUG] Inserted after requestStepSection');
                                 } else {
-                                    const requestSection = bodyEl.querySelector('.collapsible-section');
-                                    if (requestSection) {
-                                        requestSection.closest('.step-section').insertAdjacentHTML('afterend', responseBodyHtml);
-                                    } else {
-                                        bodyEl.insertAdjacentHTML('afterbegin', responseBodyHtml);
-                                    }
+                                    bodyEl.insertAdjacentHTML('afterbegin', responseBodyHtml);
+                                    console.log('[DEBUG] Inserted at beginning of bodyEl');
                                 }
                             }
                         }
@@ -1960,14 +1993,13 @@ HTML_TEMPLATE = """
                         
                         // Add error message if present
                         if (stepResult.error_message) {
-                            const bodyEl = stepEl.querySelector('.step-detail-body');
-                            if (!bodyEl.querySelector('.step-error-msg')) {
-                                bodyEl.insertAdjacentHTML('beforeend', `
+                            const errBodyEl = stepEl.querySelector('.step-detail-body');
+                            if (errBodyEl && !errBodyEl.querySelector('.step-error-msg')) {
+                                errBodyEl.insertAdjacentHTML('beforeend', `
                                     <div class="step-error-msg">${stepResult.error_message}</div>
                                 `);
                             }
                         }
-                    }
                 });
             }
         }
@@ -2017,9 +2049,48 @@ HTML_TEMPLATE = """
             // Reset test case displays
             displayTestSuite(currentSuite);
             
-            // Start SSE connection with selected test case IDs
-            const idsParam = encodeURIComponent(selectedIds.join(','));
-            const eventSource = new EventSource(`/execute-stream?suite_id=${currentSuiteId}&test_case_ids=${idsParam}`);
+            // Check if we have a saved payload from the Builder
+            const savedPayload = sessionStorage.getItem('payment_payload');
+            
+            // Function to start the actual execution
+            const startExecution = () => {
+                const idsParam = encodeURIComponent(selectedIds.join(','));
+                const eventSource = new EventSource(`/execute-stream?suite_id=${currentSuiteId}&test_case_ids=${idsParam}`);
+                setupEventSource(eventSource);
+            };
+            
+            // If we have a saved payload, send it to the backend first
+            if (savedPayload) {
+                try {
+                    const payload = JSON.parse(savedPayload);
+                    fetch('/api/update-payload', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ suite_id: currentSuiteId, payload: payload })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            console.error('Failed to apply payload:', data.error);
+                        } else {
+                            console.log('Payload applied:', data.message);
+                        }
+                        startExecution();
+                    })
+                    .catch(error => {
+                        console.error('Error applying payload:', error);
+                        startExecution();
+                    });
+                } catch (e) {
+                    console.error('Invalid saved payload:', e);
+                    startExecution();
+                }
+            } else {
+                startExecution();
+            }
+        });
+        
+        function setupEventSource(eventSource) {
             
             eventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -2080,7 +2151,7 @@ HTML_TEMPLATE = """
                 executionStatus.classList.add('hidden');
                 actions.classList.remove('hidden');
             };
-        });
+        }
         
         document.getElementById('download-btn').addEventListener('click', () => {
             if (currentExecutionId) {
@@ -2227,6 +2298,61 @@ def upload_file():
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 
 
+@app.route('/api/update-payload', methods=['POST'])
+def update_payload():
+    """
+    Update the input_data for all first steps in a test suite with the Builder payload.
+    
+    The payload is applied as-is to all test cases' first step, with only the provider
+    metadata being modified to match each test case's provider.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    suite_id = data.get('suite_id')
+    payload = data.get('payload')
+    
+    if not suite_id or suite_id not in uploaded_suites:
+        return jsonify({'error': 'Test suite not found'}), 404
+    
+    if not payload:
+        return jsonify({'error': 'No payload provided'}), 400
+    
+    test_suite = uploaded_suites[suite_id]
+    
+    # Apply payload to first step of each test case
+    # Only modify the provider metadata to match the test case's provider
+    import copy
+    for test_case in test_suite.test_cases:
+        if test_case.steps:
+            # Deep copy the payload so each test case has its own copy
+            step_payload = copy.deepcopy(payload)
+            
+            # Get the provider from the test case's first step
+            provider = test_case.steps[0].provider
+            
+            # Update only the provider in metadata
+            if "metadata" not in step_payload:
+                step_payload["metadata"] = []
+            
+            # Update existing provider metadata or add new one
+            provider_updated = False
+            for m in step_payload["metadata"]:
+                if m.get("key") == "provider":
+                    m["value"] = provider
+                    provider_updated = True
+                    break
+            
+            if not provider_updated:
+                step_payload["metadata"].append({"key": "provider", "value": provider})
+            
+            # Replace the step's input_data with the user's payload
+            test_case.steps[0].input_data = step_payload
+    
+    return jsonify({'success': True, 'message': f'Payload applied to {len(test_suite.test_cases)} test cases'})
+
+
 def execute_test_case_streaming(test_case: TestCase, api_client: APIClient, 
                                  context: ExecutionContext, logger: CertificationLogger) -> TestCaseResult:
     """Execute a single test case and return result."""
@@ -2268,7 +2394,13 @@ def execute_test_case_streaming(test_case: TestCase, api_client: APIClient,
 def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
                  context: ExecutionContext, logger: CertificationLogger) -> StepResult:
     """Execute a single step."""
+    from colorama import Fore, Style
+    
     start_ms = time.time() * 1000
+    response = None
+    request_obj = None
+    
+    print(f"\n{Fore.CYAN}[DEBUG] Executing step {step.step_id}: {step.operation} for {step.provider}{Style.RESET_ALL}")
     
     try:
         # Substitute variables in input data
@@ -2282,14 +2414,21 @@ def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
         )
         
         # Execute API call
+        print(f"{Fore.YELLOW}[DEBUG] Making API call to: {api_client.yuno_base_url}/payments{Style.RESET_ALL}")
         response = api_client.execute_operation(step.operation, step.provider, substituted_data)
+        
+        print(f"{Fore.BLUE}[DEBUG] API Response Status Code: {response.status_code}{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}[DEBUG] API Response Body: {json.dumps(response.body, indent=2) if response.body else 'None'}{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}[DEBUG] API Response is_success: {response.is_success}{Style.RESET_ALL}")
         
         # Capture variables from response
         captured_vars = {}
         if step.capture_variables and response.body:
+            print(f"{Fore.MAGENTA}[DEBUG] Attempting to capture variables: {list(step.capture_variables.keys())}{Style.RESET_ALL}")
             captured_vars = context.capture_variables_from_response(
                 {"body": response.body}, step.capture_variables
             )
+            print(f"{Fore.GREEN}[DEBUG] Successfully captured: {captured_vars}{Style.RESET_ALL}")
         
         duration_ms = int((time.time() * 1000) - start_ms)
         status = "success" if response.is_success else "failure"
@@ -2300,6 +2439,8 @@ def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
             captured_variables=captured_vars if captured_vars else None
         )
         
+        print(f"{Fore.GREEN}[DEBUG] Step completed with status: {status}, response attached: {result.response is not None}{Style.RESET_ALL}")
+        
         logger.log_step(test_case.id, test_case.name, step, request_obj, response,
                        status, duration_ms, captured_variables=captured_vars)
         return result
@@ -2307,21 +2448,38 @@ def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
     except ContextError as e:
         duration_ms = int((time.time() * 1000) - start_ms)
         error_msg = f"Context error: {str(e)}"
+        print(f"{Fore.RED}[DEBUG] ContextError occurred: {error_msg}{Style.RESET_ALL}")
+        print(f"{Fore.RED}[DEBUG] Response available: {response is not None}{Style.RESET_ALL}")
+        if response:
+            print(f"{Fore.RED}[DEBUG] Response body at error time: {json.dumps(response.body, indent=2) if response.body else 'None'}{Style.RESET_ALL}")
+        
+        # Include response if available so user can see what the API returned
         result = StepResult(
             step_id=step.step_id, operation=step.operation, provider=step.provider,
-            status="error", duration_ms=duration_ms, error_message=error_msg
+            status="error", duration_ms=duration_ms, error_message=error_msg,
+            request=request_obj, response=response
         )
-        logger.log_step(test_case.id, test_case.name, step, None, None,
+        
+        print(f"{Fore.RED}[DEBUG] StepResult created with response attached: {result.response is not None}{Style.RESET_ALL}")
+        if result.response:
+            print(f"{Fore.RED}[DEBUG] StepResult.response.body: {result.response.body}{Style.RESET_ALL}")
+        
+        logger.log_step(test_case.id, test_case.name, step, request_obj, response,
                        "error", duration_ms, error_message=error_msg)
         return result
     except Exception as e:
         duration_ms = int((time.time() * 1000) - start_ms)
         error_msg = f"Execution error: {str(e)}"
+        print(f"{Fore.RED}[DEBUG] Exception occurred: {error_msg}{Style.RESET_ALL}")
+        print(f"{Fore.RED}[DEBUG] Response available: {response is not None}{Style.RESET_ALL}")
+        
+        # Include response if available so user can see what the API returned
         result = StepResult(
             step_id=step.step_id, operation=step.operation, provider=step.provider,
-            status="error", duration_ms=duration_ms, error_message=error_msg
+            status="error", duration_ms=duration_ms, error_message=error_msg,
+            request=request_obj, response=response
         )
-        logger.log_step(test_case.id, test_case.name, step, None, None,
+        logger.log_step(test_case.id, test_case.name, step, request_obj, response,
                        "error", duration_ms, error_message=error_msg)
         return result
 
@@ -2372,6 +2530,26 @@ def execute_stream():
                 # Execute test case
                 result = execute_test_case_streaming(test_case, api_client, context, logger)
                 
+                # Build step data with debug logging
+                from colorama import Fore, Style
+                steps_data = []
+                for s in result.steps:
+                    step_data = {
+                        'step_id': s.step_id,
+                        'operation': s.operation,
+                        'status': s.status,
+                        'duration_ms': s.duration_ms,
+                        'error_message': s.error_message,
+                        'captured_variables': s.captured_variables,
+                        'response_status': s.response.body.get('status') if s.response and s.response.body else None,
+                        'response_substatus': s.response.body.get('sub_status') if s.response and s.response.body else None,
+                        'http_status_code': s.response.status_code if s.response else None,
+                        'response_body': s.response.body if s.response else None
+                    }
+                    print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - response attached: {s.response is not None}{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - response_body being sent: {step_data['response_body']}{Style.RESET_ALL}")
+                    steps_data.append(step_data)
+                
                 # Send result event
                 result_data = {
                     'type': 'test_case_result',
@@ -2381,21 +2559,7 @@ def execute_stream():
                         'status': result.status,
                         'duration_ms': result.duration_ms,
                         'error_message': result.error_message,
-                        'steps': [
-                            {
-                                'step_id': s.step_id,
-                                'operation': s.operation,
-                                'status': s.status,
-                                'duration_ms': s.duration_ms,
-                                'error_message': s.error_message,
-                                'captured_variables': s.captured_variables,
-                                'response_status': s.response.body.get('status') if s.response and s.response.body else None,
-                                'response_substatus': s.response.body.get('sub_status') if s.response and s.response.body else None,
-                                'http_status_code': s.response.status_code if s.response else None,
-                                'response_body': s.response.body if s.response else None
-                            }
-                            for s in result.steps
-                        ]
+                        'steps': steps_data
                     }
                 }
                 yield f"data: {json.dumps(result_data)}\n\n"

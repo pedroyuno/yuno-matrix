@@ -389,8 +389,9 @@ class TestCaseGenerator:
     def _get_customer_data(self, country: str) -> Dict[str, Any]:
         """Get customer data based on country."""
         # Default Brazil customer
+        # NOTE: Do NOT include "id" field - Yuno will create the customer if it doesn't exist
+        # If you need to use an existing customer, set the ID from an environment variable or config
         customer = {
-            "id": str(uuid.uuid4()),
             "email": "test@y.uno",
             "first_name": "Test",
             "last_name": "User",
@@ -461,7 +462,7 @@ class TestCaseGenerator:
         
         return {
             f"{prefix}_payment_id": "$.body.id",
-            f"{prefix}_transaction_id": "$.body.transactions[0].id",
+            f"{prefix}_transaction_id": "$.body.transactions.id",
             f"{prefix}_status": "$.body.status"
         }
     

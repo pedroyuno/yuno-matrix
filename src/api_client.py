@@ -92,7 +92,8 @@ class APIClient:
             'capture': self.capture,
             'purchase': self.purchase,
             'refund': self.refund,
-            'void': self.void,
+            'cancel': self.cancel,
+            'void': self.void,  # Alias for cancel
             'verify': self.verify,
             'tokenize': self.tokenize,
             'payment': self.payment  # Yuno-specific payment operation
@@ -184,6 +185,10 @@ class APIClient:
         """
         Execute a Yuno payment operation (authorize + capture in one step).
 
+        The user's JSON payload is sent as-is, with only two modifications:
+        1. account_id is added if not present (required by Yuno API)
+        2. provider metadata is updated to match the provider being tested
+
         Args:
             provider: Provider identifier (can be passed in metadata)
             data: Payment data (follows Yuno API structure)
@@ -194,25 +199,24 @@ class APIClient:
         if self.placeholder_mode:
             return self._mock_payment(provider, data)
 
-        # Ensure required fields are present
+        # Only add account_id if not present (required by Yuno API)
         if "account_id" not in data and self.yuno_account_id:
             data["account_id"] = self.yuno_account_id
 
-        # Merge with default payment data from config if available
-        if hasattr(self.config, 'default_payment_data'):
-            default_data = self.config.default_payment_data
-            # Merge default data with provided data (provided data takes precedence)
-            for key, value in default_data.items():
-                if key not in data:
-                    data[key] = value
-
-        # Add provider to metadata if specified
+        # Update provider in metadata to match the provider being tested
         if provider and provider.lower() != "yuno":
             if "metadata" not in data:
                 data["metadata"] = []
-            # Check if provider metadata already exists
-            provider_exists = any(m.get("key") == "provider" for m in data["metadata"])
-            if not provider_exists:
+            
+            # Update existing provider metadata or add new one
+            provider_updated = False
+            for m in data["metadata"]:
+                if m.get("key") == "provider":
+                    m["value"] = provider
+                    provider_updated = True
+                    break
+            
+            if not provider_updated:
                 data["metadata"].append({"key": "provider", "value": provider})
 
         return self._make_yuno_request("/payments", "POST", data)
@@ -226,23 +230,55 @@ class APIClient:
             data: Payment data
 
         Returns:
-            Mock APIResponse
+            Mock APIResponse matching Yuno API structure
         """
         payment_id = f"pay_{uuid.uuid4().hex[:16]}"
         transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+
+        # Determine if capture is enabled (default true for purchase)
+        capture = True
+        if "payment_method" in data and "detail" in data["payment_method"]:
+            if "card" in data["payment_method"]["detail"]:
+                capture = data["payment_method"]["detail"]["card"].get("capture", True)
+
+        # Set status based on capture flag
+        if capture:
+            status = "SUCCEEDED"
+            sub_status = "CAPTURED"
+        else:
+            status = "PENDING"
+            sub_status = "AUTHORIZED"
+
+        amount_data = data.get("amount", {"value": 0, "currency": "USD"})
 
         return APIResponse(
             status_code=200,
             headers={"Content-Type": "application/json"},
             body={
                 "id": payment_id,
-                "transaction_id": transaction_id,
-                "status": "SUCCEEDED",
-                "amount": data.get("amount", {"value": 0, "currency": "USD"}),
+                "status": status,
+                "sub_status": sub_status,
+                "amount": {
+                    "value": amount_data.get("value", 0),
+                    "currency": amount_data.get("currency", "USD"),
+                    "captured": amount_data.get("value", 0) if capture else 0,
+                    "refunded": 0
+                },
                 "merchant_order_id": data.get("merchant_order_id", f"order_{uuid.uuid4().hex[:8]}"),
                 "description": data.get("description", "Test Payment"),
                 "country": data.get("country", "US"),
                 "created_at": datetime.utcnow().isoformat() + "Z",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "transactions": {
+                    "id": transaction_id,
+                    "type": "AUTHORIZE" if not capture else "PAYMENT",
+                    "status": status,
+                    "category": "CARD",
+                    "amount": amount_data.get("value", 0),
+                    "response_code": "SUCCEEDED",
+                    "response_message": "Transaction successful",
+                    "created_at": datetime.utcnow().isoformat() + "Z"
+                },
                 "provider": provider
             },
             duration_ms=180
@@ -252,8 +288,8 @@ class APIClient:
         """
         Execute authorization operation.
 
-        For Yuno API: Creates a payment with capture=false
-        For placeholder: Returns mock authorization
+        For Yuno API: Creates a payment with capture=false.
+        The user's JSON is preserved - only sets capture=false if the card structure exists.
 
         Args:
             provider: Provider identifier
@@ -264,15 +300,13 @@ class APIClient:
         """
         if not self.placeholder_mode:
             # For Yuno, authorization is a payment with capture=false
-            if "payment_method" not in data:
-                data["payment_method"] = {}
-            if "detail" not in data["payment_method"]:
-                data["payment_method"]["detail"] = {}
-            if "card" not in data["payment_method"]["detail"]:
-                data["payment_method"]["detail"]["card"] = {}
-
-            # Set capture to false for authorization only
-            data["payment_method"]["detail"]["card"]["capture"] = False
+            # Only set capture=false if the user provided a card payment method
+            # Don't force creation of nested structures that might not apply
+            if "payment_method" in data:
+                if "detail" in data["payment_method"]:
+                    if "card" in data["payment_method"]["detail"]:
+                        # User provided card details - set capture to false
+                        data["payment_method"]["detail"]["card"]["capture"] = False
 
             return self.payment(provider, data)
 
@@ -300,49 +334,80 @@ class APIClient:
         Execute capture operation.
 
         For Yuno API: Captures a previously authorized payment
-        For placeholder: Returns mock capture
+        Endpoint: POST /v1/payments/{payment_id}/transactions/{transaction_id}/capture
 
         Args:
             provider: Provider identifier
-            data: Capture data (must include payment_id or transaction_id)
+            data: Capture data (must include payment_id and transaction_id)
+                - payment_id: The payment ID
+                - transaction_id: The transaction ID
+                - amount: Optional amount object with currency and value
+                - merchant_reference: Reference for the capture (auto-generated if not provided)
+                - reason: Reason for capture (default: PRODUCT_CONFIRMED)
 
         Returns:
             Capture response
         """
         if not self.placeholder_mode:
-            # For Yuno, we need the payment ID to capture
-            payment_id = data.get("payment_id") or data.get("transaction_id")
+            payment_id = data.get("payment_id")
+            transaction_id = data.get("transaction_id")
+
             if not payment_id:
                 return APIResponse(
                     status_code=400,
                     headers={},
-                    body={},
-                    error="payment_id or transaction_id required for capture"
+                    body={"error": "payment_id is required for capture"},
+                    error="payment_id is required for capture"
                 )
 
-            # Capture endpoint: POST /v1/payments/{payment_id}/capture
+            if not transaction_id:
+                return APIResponse(
+                    status_code=400,
+                    headers={},
+                    body={"error": "transaction_id is required for capture"},
+                    error="transaction_id is required for capture"
+                )
+
+            # Build capture request body per Yuno API spec
             capture_data = {
-                "amount": data.get("amount")
-            } if "amount" in data else {}
+                "merchant_reference": data.get("merchant_reference", f"capture_{uuid.uuid4().hex[:8]}"),
+                "reason": data.get("reason", "PRODUCT_CONFIRMED"),
+                "amount": data.get("amount", {"currency": "USD", "value": 0})
+            }
+
+            # Include additional_data if provided
+            if "additional_data" in data:
+                capture_data["additional_data"] = data["additional_data"]
 
             return self._make_yuno_request(
-                f"/payments/{payment_id}/capture",
+                f"/payments/{payment_id}/transactions/{transaction_id}/capture",
                 "POST",
                 capture_data
             )
 
         # Placeholder mode
-        transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
+        mock_transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
+        mock_payment_id = data.get("payment_id", f"pay_{uuid.uuid4().hex[:16]}")
 
         return APIResponse(
             status_code=200,
             headers={"Content-Type": "application/json"},
             body={
-                "transaction_id": transaction_id,
-                "status": "captured",
-                "amount": data.get("amount", 0),
-                "currency": data.get("currency", "USD"),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "id": f"cap_{uuid.uuid4().hex[:12]}",
+                "type": "CAPTURE",
+                "status": "SUCCEEDED",
+                "category": "CARD",
+                "amount": data.get("amount", {"currency": "USD", "value": 0, "captured": 0, "refunded": 0}),
+                "merchant_reference": data.get("merchant_reference", f"capture_{uuid.uuid4().hex[:8]}"),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "response_code": "SUCCEEDED",
+                "response_message": "Transaction successful",
+                "payment": {
+                    "id": mock_payment_id,
+                    "status": "SUCCEEDED",
+                    "sub_status": "CAPTURED"
+                },
                 "provider": provider
             },
             duration_ms=120
@@ -398,102 +463,210 @@ class APIClient:
         Execute refund operation.
 
         For Yuno API: Creates a refund for a payment
-        For placeholder: Returns mock refund
+        Endpoint: POST /v1/payments/{payment_id}/transactions/{transaction_id}/refund
 
         Args:
             provider: Provider identifier
-            data: Refund data (must include payment_id or transaction_id)
+            data: Refund data
+                - payment_id: The payment ID
+                - transaction_id: The transaction ID
+                - merchant_reference: Reference for the refund (auto-generated if not provided)
+                - reason: Reason for refund (DUPLICATE, FRAUDULENT, REQUESTED_BY_CUSTOMER)
+                - description: Optional description
+                - amount: Optional amount for partial refunds (omit for full refund)
 
         Returns:
             Refund response
         """
         if not self.placeholder_mode:
-            # For Yuno, we need the payment ID to refund
-            payment_id = data.get("payment_id") or data.get("transaction_id")
+            payment_id = data.get("payment_id")
+            transaction_id = data.get("transaction_id")
+
             if not payment_id:
                 return APIResponse(
                     status_code=400,
                     headers={},
-                    body={},
-                    error="payment_id or transaction_id required for refund"
+                    body={"error": "payment_id is required for refund"},
+                    error="payment_id is required for refund"
                 )
 
-            # Refund endpoint: POST /v1/payments/{payment_id}/refund
+            if not transaction_id:
+                return APIResponse(
+                    status_code=400,
+                    headers={},
+                    body={"error": "transaction_id is required for refund"},
+                    error="transaction_id is required for refund"
+                )
+
+            # Build refund request body per Yuno API spec
             refund_data = {
-                "amount": data.get("amount")
-            } if "amount" in data else {}
+                "merchant_reference": data.get("merchant_reference", f"refund_{uuid.uuid4().hex[:8]}")
+            }
+
+            # Add optional fields if provided
+            if "reason" in data:
+                refund_data["reason"] = data["reason"]
+            else:
+                refund_data["reason"] = "REQUESTED_BY_CUSTOMER"
+
+            if "description" in data:
+                refund_data["description"] = data["description"]
+
+            # For partial refund, include amount
+            if "amount" in data:
+                refund_data["amount"] = data["amount"]
 
             return self._make_yuno_request(
-                f"/payments/{payment_id}/refund",
+                f"/payments/{payment_id}/transactions/{transaction_id}/refund",
                 "POST",
                 refund_data
             )
 
         # Placeholder mode
-        transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
+        mock_transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
+        mock_payment_id = data.get("payment_id", f"pay_{uuid.uuid4().hex[:16]}")
         refund_id = f"ref_{uuid.uuid4().hex[:12]}"
+
+        # Determine if partial or full refund based on amount presence
+        is_partial = "amount" in data
+        refunded_amount = data.get("amount", {"currency": "USD", "value": 0})
 
         return APIResponse(
             status_code=200,
             headers={"Content-Type": "application/json"},
             body={
-                "transaction_id": transaction_id,
-                "refund_id": refund_id,
-                "status": "refunded",
-                "amount": data.get("amount", 0),
-                "currency": data.get("currency", "USD"),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "id": mock_payment_id,
+                "status": "REFUNDED" if not is_partial else "SUCCEEDED",
+                "sub_status": "REFUNDED" if not is_partial else "PARTIALLY_REFUNDED",
+                "amount": {
+                    "captured": 0,
+                    "currency": refunded_amount.get("currency", "USD"),
+                    "refunded": refunded_amount.get("value", 0),
+                    "value": refunded_amount.get("value", 0)
+                },
+                "transactions": {
+                    "id": refund_id,
+                    "type": "REFUND",
+                    "status": "SUCCEEDED",
+                    "category": "CARD",
+                    "amount": refunded_amount.get("value", 0),
+                    "response_code": "SUCCEEDED",
+                    "response_message": "Transaction successful",
+                    "reason": data.get("reason", "REQUESTED_BY_CUSTOMER"),
+                    "merchant_reference": data.get("merchant_reference", f"refund_{uuid.uuid4().hex[:8]}"),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "updated_at": datetime.utcnow().isoformat() + "Z"
+                },
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
                 "provider": provider
             },
             duration_ms=160
         )
 
-    def void(self, provider: str, data: Dict[str, Any]) -> APIResponse:
+    def cancel(self, provider: str, data: Dict[str, Any]) -> APIResponse:
         """
-        Execute void operation.
+        Execute cancel operation.
 
-        For Yuno API: Voids (cancels) a payment
-        For placeholder: Returns mock void
+        For Yuno API: Cancels a pending payment (authorized but not captured)
+        Endpoint: POST /v1/payments/{payment_id}/transactions/{transaction_id}/cancel
 
         Args:
             provider: Provider identifier
-            data: Void data (must include payment_id or transaction_id)
+            data: Cancel data
+                - payment_id: The payment ID
+                - transaction_id: The transaction ID
+                - merchant_reference: Reference for the cancellation (auto-generated if not provided)
+                - reason: Reason for cancellation (DUPLICATE, FRAUDULENT, REQUESTED_BY_CUSTOMER)
+                - description: Optional description
 
         Returns:
-            Void response
+            Cancel response
         """
         if not self.placeholder_mode:
-            # For Yuno, we need the payment ID to void
-            payment_id = data.get("payment_id") or data.get("transaction_id")
+            payment_id = data.get("payment_id")
+            transaction_id = data.get("transaction_id")
+
             if not payment_id:
                 return APIResponse(
                     status_code=400,
                     headers={},
-                    body={},
-                    error="payment_id or transaction_id required for void"
+                    body={"error": "payment_id is required for cancel"},
+                    error="payment_id is required for cancel"
                 )
 
-            # Void endpoint: POST /v1/payments/{payment_id}/void
+            if not transaction_id:
+                return APIResponse(
+                    status_code=400,
+                    headers={},
+                    body={"error": "transaction_id is required for cancel"},
+                    error="transaction_id is required for cancel"
+                )
+
+            # Build cancel request body per Yuno API spec
+            cancel_data = {
+                "merchant_reference": data.get("merchant_reference", f"cancel_{uuid.uuid4().hex[:8]}")
+            }
+
+            # Add optional fields if provided
+            if "reason" in data:
+                cancel_data["reason"] = data["reason"]
+            else:
+                cancel_data["reason"] = "REQUESTED_BY_CUSTOMER"
+
+            if "description" in data:
+                cancel_data["description"] = data["description"]
+
             return self._make_yuno_request(
-                f"/payments/{payment_id}/void",
+                f"/payments/{payment_id}/transactions/{transaction_id}/cancel",
                 "POST",
-                {}
+                cancel_data
             )
 
         # Placeholder mode
-        transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
+        mock_transaction_id = data.get("transaction_id", f"txn_{uuid.uuid4().hex[:12]}")
+        mock_payment_id = data.get("payment_id", f"pay_{uuid.uuid4().hex[:16]}")
+        cancel_id = f"cnl_{uuid.uuid4().hex[:12]}"
 
         return APIResponse(
             status_code=200,
             headers={"Content-Type": "application/json"},
             body={
-                "transaction_id": transaction_id,
-                "status": "voided",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "id": cancel_id,
+                "type": "CANCEL",
+                "status": "SUCCEEDED",
+                "category": "CARD",
+                "amount": data.get("amount", {"currency": "USD", "value": 0, "captured": 0, "refunded": 0}),
+                "merchant_reference": data.get("merchant_reference", f"cancel_{uuid.uuid4().hex[:8]}"),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "response_code": "SUCCEEDED",
+                "response_message": "Transaction successful",
+                "payment": {
+                    "id": mock_payment_id,
+                    "status": "CANCELED",
+                    "sub_status": "CANCELED"
+                },
                 "provider": provider
             },
             duration_ms=100
         )
+
+    def void(self, provider: str, data: Dict[str, Any]) -> APIResponse:
+        """
+        Execute void operation (alias for cancel).
+
+        For Yuno API: Voids (cancels) a payment - delegates to cancel operation
+
+        Args:
+            provider: Provider identifier
+            data: Void data (must include payment_id and transaction_id)
+
+        Returns:
+            Void/Cancel response
+        """
+        # Void is an alias for cancel in Yuno API
+        return self.cancel(provider, data)
 
     def verify(self, provider: str, data: Dict[str, Any]) -> APIResponse:
         """

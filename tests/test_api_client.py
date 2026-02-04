@@ -75,9 +75,14 @@ def test_capture_operation(mock_config):
     """Test capture operation."""
     config = Config(**mock_config)
     client = APIClient(config)
-    response = client.capture("provider_a", {"transaction_id": "txn_123", "amount": 100})
+    response = client.capture("provider_a", {
+        "payment_id": "pay_123",
+        "transaction_id": "txn_123",
+        "amount": {"currency": "USD", "value": 100}
+    })
     assert response.status_code == 200
-    assert response.body["status"] == "captured"
+    assert response.body["status"] == "SUCCEEDED"
+    assert response.body["type"] == "CAPTURE"
 
 @pytest.mark.unit
 def test_purchase_operation(mock_config):
@@ -93,10 +98,29 @@ def test_refund_operation(mock_config):
     """Test refund operation."""
     config = Config(**mock_config)
     client = APIClient(config)
-    response = client.refund("provider_a", {"transaction_id": "txn_123", "amount": 50})
+    response = client.refund("provider_a", {
+        "payment_id": "pay_123",
+        "transaction_id": "txn_123",
+        "amount": {"currency": "USD", "value": 50}
+    })
     assert response.status_code == 200
-    assert response.body["status"] == "refunded"
-    assert "refund_id" in response.body
+    # Full refund returns REFUNDED status
+    assert response.body["status"] in ["REFUNDED", "SUCCEEDED"]
+    assert "transactions" in response.body
+
+
+@pytest.mark.unit
+def test_cancel_operation(mock_config):
+    """Test cancel operation."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    response = client.cancel("provider_a", {
+        "payment_id": "pay_123",
+        "transaction_id": "txn_123"
+    })
+    assert response.status_code == 200
+    assert response.body["status"] == "SUCCEEDED"
+    assert response.body["type"] == "CANCEL"
 
 @pytest.mark.unit
 def test_execute_operation_dispatch(mock_config):
@@ -122,10 +146,11 @@ def test_all_operations_return_response(mock_config):
     client = APIClient(config)
     operations = [
         ("authorize", {"amount": 100}),
-        ("capture", {"transaction_id": "txn_123", "amount": 100}),
+        ("capture", {"payment_id": "pay_123", "transaction_id": "txn_123", "amount": {"currency": "USD", "value": 100}}),
         ("purchase", {"amount": 50}),
-        ("refund", {"transaction_id": "txn_123", "amount": 50}),
-        ("void", {"transaction_id": "txn_123"}),
+        ("refund", {"payment_id": "pay_123", "transaction_id": "txn_123", "amount": {"currency": "USD", "value": 50}}),
+        ("cancel", {"payment_id": "pay_123", "transaction_id": "txn_123"}),
+        ("void", {"payment_id": "pay_123", "transaction_id": "txn_123"}),
         ("verify", {}),
         ("tokenize", {"card_number": "4111111111111111"})
     ]

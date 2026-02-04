@@ -92,6 +92,8 @@ class TestExecutor:
     def execute_step(self, test_case: TestCase, step: Step) -> StepResult:
         """Execute single step."""
         start_ms = time.time() * 1000
+        response = None
+        request = None
         
         try:
             # Substitute variables in input data
@@ -130,20 +132,24 @@ class TestExecutor:
         except ContextError as e:
             duration_ms = int((time.time() * 1000) - start_ms)
             error_msg = f"Context error: {str(e)}"
+            # Include response if available so user can see what the API returned
             result = StepResult(
                 step_id=step.step_id, operation=step.operation, provider=step.provider,
-                status="error", duration_ms=duration_ms, error_message=error_msg
+                status="error", duration_ms=duration_ms, error_message=error_msg,
+                request=request, response=response
             )
-            self.logger.log_step(test_case.id, test_case.name, step, None, None,
+            self.logger.log_step(test_case.id, test_case.name, step, request, response,
                                "error", duration_ms, error_message=error_msg)
             return result
         except Exception as e:
             duration_ms = int((time.time() * 1000) - start_ms)
             error_msg = f"Execution error: {str(e)}"
+            # Include response if available so user can see what the API returned
             result = StepResult(
                 step_id=step.step_id, operation=step.operation, provider=step.provider,
-                status="error", duration_ms=duration_ms, error_message=error_msg
+                status="error", duration_ms=duration_ms, error_message=error_msg,
+                request=request, response=response
             )
-            self.logger.log_step(test_case.id, test_case.name, step, None, None,
+            self.logger.log_step(test_case.id, test_case.name, step, request, response,
                                "error", duration_ms, error_message=error_msg)
             return result
