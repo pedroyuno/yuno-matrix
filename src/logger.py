@@ -162,6 +162,17 @@ class CertificationLogger:
         duration_str = f" ({duration_ms}ms)" if duration_ms else ""
         print(f"  {status_symbol} Step {step.step_id}: {step.description} - {step.operation}{duration_str}")
 
+        # Show request details
+        if request:
+            print(f"    {Fore.WHITE}Request: {request.method} {request.url}")
+
+        # Show response details
+        if response:
+            resp_color = Fore.GREEN if response.is_success else Fore.RED
+            print(f"    {resp_color}Response: HTTP {response.status_code}")
+            if response.error:
+                print(f"    {Fore.RED}Error: {response.error}")
+
         if captured_variables:
             vars_str = ", ".join(f"{k}={v}" for k, v in captured_variables.items())
             print(f"    {Fore.CYAN}Captured: {vars_str}")

@@ -1,7 +1,9 @@
 """Test executor for MATRIX. Orchestrates test case execution."""
+import json
 import time
 from datetime import datetime
 from typing import List
+from colorama import Fore
 from src.models import (TestSuite, TestCase, Step, ExecutionReport, 
                         TestCaseResult, StepResult, APIRequest, APIResponse)
 from src.api_client import APIClient
@@ -95,9 +97,20 @@ class TestExecutor:
         response = None
         request = None
         
+        print(f"\n{Fore.CYAN}[DEBUG] Executing step {step.step_id}: {step.operation} for {step.provider}{Fore.RESET}")
+        
+        # Log context variables for operations that depend on previous steps
+        if step.operation in ('capture', 'refund', 'cancel', 'void'):
+            all_vars = self.context.get_all_variables()
+            print(f"{Fore.MAGENTA}[DEBUG] Context variables available: {json.dumps({k: str(v) for k, v in all_vars.items()}, indent=2)}{Fore.RESET}")
+            print(f"{Fore.YELLOW}[DEBUG] Raw input data (before substitution): {json.dumps(step.input_data, indent=2, default=str)}{Fore.RESET}")
+        
         try:
             # Substitute variables in input data
             substituted_data = self.context.substitute_variables(step.input_data)
+            
+            # Log the substituted data
+            print(f"{Fore.YELLOW}[DEBUG] Substituted request data: {json.dumps(substituted_data, indent=2, default=str)}{Fore.RESET}")
             
             # Execute API call first to get the actual URL
             response = self.api_client.execute_operation(step.operation, step.provider, substituted_data)
@@ -109,12 +122,20 @@ class TestExecutor:
                 headers={"Content-Type": "application/json"}, body=substituted_data
             )
             
+            # Log the response
+            print(f"{Fore.BLUE}[DEBUG] Response Status: {response.status_code} | Success: {response.is_success}{Fore.RESET}")
+            if response.body:
+                print(f"{Fore.BLUE}[DEBUG] Response Body: {json.dumps(response.body, indent=2, default=str)}{Fore.RESET}")
+            if response.error:
+                print(f"{Fore.RED}[DEBUG] Response Error: {response.error}{Fore.RESET}")
+            
             # Capture variables from response
             captured_vars = {}
             if step.capture_variables and response.body:
                 captured_vars = self.context.capture_variables_from_response(
                     {"body": response.body}, step.capture_variables
                 )
+                print(f"{Fore.GREEN}[DEBUG] Captured variables: {json.dumps({k: str(v) for k, v in captured_vars.items()}, indent=2)}{Fore.RESET}")
             
             duration_ms = int((time.time() * 1000) - start_ms)
             status = "success" if response.is_success else "failure"
@@ -132,6 +153,9 @@ class TestExecutor:
         except ContextError as e:
             duration_ms = int((time.time() * 1000) - start_ms)
             error_msg = f"Context error: {str(e)}"
+            print(f"{Fore.RED}[DEBUG] ContextError: {error_msg}{Fore.RESET}")
+            if response:
+                print(f"{Fore.RED}[DEBUG] Response at error: {json.dumps(response.body, indent=2, default=str) if response.body else 'None'}{Fore.RESET}")
             # Include response if available so user can see what the API returned
             result = StepResult(
                 step_id=step.step_id, operation=step.operation, provider=step.provider,
@@ -144,6 +168,9 @@ class TestExecutor:
         except Exception as e:
             duration_ms = int((time.time() * 1000) - start_ms)
             error_msg = f"Execution error: {str(e)}"
+            print(f"{Fore.RED}[DEBUG] Exception: {error_msg}{Fore.RESET}")
+            if response:
+                print(f"{Fore.RED}[DEBUG] Response at error: {json.dumps(response.body, indent=2, default=str) if response.body else 'None'}{Fore.RESET}")
             # Include response if available so user can see what the API returned
             result = StepResult(
                 step_id=step.step_id, operation=step.operation, provider=step.provider,

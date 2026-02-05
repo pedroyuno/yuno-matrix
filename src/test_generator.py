@@ -470,19 +470,25 @@ class TestCaseGenerator:
     
     def _get_capture_variables(self, integration: ProviderIntegration, operation: str) -> Optional[Dict[str, str]]:
         """Get capture variables for an operation."""
-        # Only capture variables for initial operations (authorize, purchase)
-        if operation not in ('authorize', 'purchase', 'verify'):
-            return None
-        
         prefix = integration.integration_id.lower().replace('_', '')
         
-        return {
-            f"{prefix}_payment_id": "$.body.id",
-            f"{prefix}_transaction_id": "$.body.transactions.id",
-            f"{prefix}_status": "$.body.status",
-            f"{prefix}_amount_value": "$.body.amount.value",
-            f"{prefix}_amount_currency": "$.body.amount.currency"
-        }
+        if operation in ('authorize', 'purchase', 'verify'):
+            return {
+                f"{prefix}_payment_id": "$.body.id",
+                f"{prefix}_transaction_id": "$.body.transactions.id",
+                f"{prefix}_status": "$.body.status",
+                f"{prefix}_amount_value": "$.body.amount.value",
+                f"{prefix}_amount_currency": "$.body.amount.currency"
+            }
+        
+        if operation == 'capture':
+            # After capture, the refund must target the CAPTURE transaction ID ($.body.id),
+            # not the original AUTHORIZE transaction ID.
+            return {
+                f"{prefix}_transaction_id": "$.body.id",
+            }
+        
+        return None
     
     def generate_single_operation_test(
         self, 

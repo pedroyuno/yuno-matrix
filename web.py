@@ -2777,9 +2777,17 @@ def execute_step(test_case: TestCase, step: Step, api_client: APIClient,
     
     print(f"\n{Fore.CYAN}[DEBUG] Executing step {step.step_id}: {step.operation} for {step.provider}{Style.RESET_ALL}")
     
+    # Log context variables for operations that depend on previous steps
+    if step.operation in ('capture', 'refund', 'cancel', 'void'):
+        all_vars = context.get_all_variables()
+        print(f"{Fore.MAGENTA}[DEBUG] Context variables available: {json.dumps({k: str(v) for k, v in all_vars.items()}, indent=2)}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}[DEBUG] Raw input data (before substitution): {json.dumps(step.input_data, indent=2, default=str)}{Style.RESET_ALL}")
+    
     try:
         # Substitute variables in input data
         substituted_data = context.substitute_variables(step.input_data)
+        
+        print(f"{Fore.YELLOW}[DEBUG] Substituted request data: {json.dumps(substituted_data, indent=2, default=str)}{Style.RESET_ALL}")
         
         # Execute API call first to get the actual URL
         print(f"{Fore.YELLOW}[DEBUG] Making API call for operation: {step.operation}{Style.RESET_ALL}")
@@ -2920,12 +2928,17 @@ def execute_stream():
                         'duration_ms': s.duration_ms,
                         'error_message': s.error_message,
                         'captured_variables': s.captured_variables,
+                        'request_method': s.request.method if s.request else None,
+                        'request_url': s.request.url if s.request else None,
+                        'request_body': s.request.body if s.request else None,
                         'response_status': s.response.body.get('status') if s.response and s.response.body else None,
                         'response_substatus': s.response.body.get('sub_status') if s.response and s.response.body else None,
                         'http_status_code': s.response.status_code if s.response else None,
                         'response_body': s.response.body if s.response else None,
                         'response_headers': s.response.headers if s.response else None
                     }
+                    print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - request: {step_data['request_method']} {step_data['request_url']}{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - request_body being sent: {step_data['request_body']}{Style.RESET_ALL}")
                     print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - response attached: {s.response is not None}{Style.RESET_ALL}")
                     print(f"{Fore.CYAN}[SSE DEBUG] Step {s.step_id} - response_body being sent: {step_data['response_body']}{Style.RESET_ALL}")
                     steps_data.append(step_data)

@@ -123,6 +123,7 @@ class APIClient:
         Returns:
             APIResponse object
         """
+        import json as _json
         url = f"{self.yuno_base_url}{endpoint}"
 
         # Generate idempotency key if not provided
@@ -137,6 +138,10 @@ class APIClient:
             "private-secret-key": self.yuno_private_key,
             "X-Idempotency-Key": idempotency_key
         }
+
+        # Log the outgoing HTTP request
+        print(f"{Fore.CYAN}[API REQUEST] {method} {url}{Fore.RESET}")
+        print(f"{Fore.CYAN}[API REQUEST] Body: {_json.dumps(data, indent=2, default=str)}{Fore.RESET}")
 
         start_time = datetime.utcnow()
 
@@ -158,6 +163,10 @@ class APIClient:
             except ValueError:
                 response_body = {"raw_response": response.text}
 
+            # Log the HTTP response
+            print(f"{Fore.BLUE}[API RESPONSE] Status: {response.status_code} ({response.reason}) - {duration_ms}ms{Fore.RESET}")
+            print(f"{Fore.BLUE}[API RESPONSE] Body: {_json.dumps(response_body, indent=2, default=str)}{Fore.RESET}")
+
             return APIResponse(
                 status_code=response.status_code,
                 headers=dict(response.headers),
@@ -168,6 +177,7 @@ class APIClient:
             )
 
         except requests.exceptions.Timeout:
+            print(f"{Fore.RED}[API RESPONSE] TIMEOUT on {method} {url}{Fore.RESET}")
             return APIResponse(
                 status_code=408,
                 headers={},
@@ -176,6 +186,7 @@ class APIClient:
                 request_url=url
             )
         except requests.exceptions.RequestException as e:
+            print(f"{Fore.RED}[API RESPONSE] REQUEST FAILED: {str(e)}{Fore.RESET}")
             return APIResponse(
                 status_code=0,
                 headers={},
@@ -547,14 +558,30 @@ class APIClient:
         Returns:
             Refund response
         """
+        import json as _json
         payment_id = data.get("payment_id")
         transaction_id = data.get("transaction_id")
+        
+        # Log refund input for troubleshooting
+        is_partial = "amount" in data
+        refund_type = "PARTIAL" if is_partial else "FULL"
+        print(f"\n{Fore.YELLOW}{'='*60}")
+        print(f"{Fore.YELLOW}[REFUND] Starting {refund_type} refund for provider: {provider}")
+        print(f"{Fore.YELLOW}[REFUND] Input data received:")
+        print(f"{Fore.YELLOW}  payment_id:    {payment_id}")
+        print(f"{Fore.YELLOW}  transaction_id: {transaction_id}")
+        print(f"{Fore.YELLOW}  reason:         {data.get('reason', 'N/A')}")
+        print(f"{Fore.YELLOW}  amount:         {data.get('amount', 'N/A (full refund)')}")
+        print(f"{Fore.YELLOW}  merchant_ref:   {data.get('merchant_reference', 'N/A (auto-generated)')}")
+        print(f"{Fore.YELLOW}  All input keys: {list(data.keys())}")
+        print(f"{Fore.YELLOW}{'='*60}{Fore.RESET}")
         
         # Build the expected URL even for error cases
         refund_url = f"{self.yuno_base_url}/payments/{payment_id or '{payment_id}'}/transactions/{transaction_id or '{transaction_id}'}/refund"
         
         if not self.placeholder_mode:
             if not payment_id:
+                print(f"{Fore.RED}[REFUND] ERROR: payment_id is missing!{Fore.RESET}")
                 return APIResponse(
                     status_code=400,
                     headers={},
@@ -564,6 +591,7 @@ class APIClient:
                 )
 
             if not transaction_id:
+                print(f"{Fore.RED}[REFUND] ERROR: transaction_id is missing!{Fore.RESET}")
                 return APIResponse(
                     status_code=400,
                     headers={},
@@ -590,11 +618,25 @@ class APIClient:
             if "amount" in data:
                 refund_data["amount"] = data["amount"]
 
-            return self._make_yuno_request(
+            print(f"{Fore.CYAN}[REFUND] Sending to Yuno API:")
+            print(f"{Fore.CYAN}[REFUND] URL: POST {self.yuno_base_url}/payments/{payment_id}/transactions/{transaction_id}/refund")
+            print(f"{Fore.CYAN}[REFUND] Request body: {_json.dumps(refund_data, indent=2, default=str)}{Fore.RESET}")
+
+            response = self._make_yuno_request(
                 f"/payments/{payment_id}/transactions/{transaction_id}/refund",
                 "POST",
                 refund_data
             )
+
+            # Log refund result
+            if response.is_success:
+                print(f"{Fore.GREEN}[REFUND] SUCCESS - Status: {response.status_code}{Fore.RESET}")
+            else:
+                print(f"{Fore.RED}[REFUND] FAILED - Status: {response.status_code}")
+                print(f"{Fore.RED}[REFUND] Error: {response.error}")
+                print(f"{Fore.RED}[REFUND] Response body: {_json.dumps(response.body, indent=2, default=str)}{Fore.RESET}")
+
+            return response
 
         # Placeholder mode
         mock_transaction_id = transaction_id or f"txn_{uuid.uuid4().hex[:12]}"
