@@ -951,7 +951,10 @@ HTML_TEMPLATE = """
             <!-- Saved Payload Notice -->
             <div id="saved-payload-notice" class="hidden" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
                 <span style="color: #059669;">You have a saved payment payload. It will be used for all test cases.</span>
-                <button onclick="clearBuilderPayload()" style="background: none; border: 1px solid #10b981; color: #059669; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Clear</button>
+                <div style="display: flex; gap: 8px;">
+                    <button onclick="viewBuilderPayload()" style="background: #059669; border: none; color: white; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">View/Edit</button>
+                    <button onclick="clearBuilderPayload(); document.getElementById('saved-payload-notice').classList.add('hidden');" style="background: none; border: 1px solid #10b981; color: #059669; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Clear</button>
+                </div>
             </div>
             
             <div style="text-align: center; color: #888; margin: 16px 0;">— or —</div>
@@ -1270,6 +1273,11 @@ HTML_TEMPLATE = """
         function clearBuilderPayload() {
             sessionStorage.removeItem('payment_payload');
             document.getElementById('saved-payload-notice').classList.add('hidden');
+        }
+        
+        function viewBuilderPayload() {
+            // Navigate to builder - the payload will be loaded there from sessionStorage
+            window.location.href = '/builder';
         }
         
         function extractProvider(payload) {
@@ -3663,6 +3671,32 @@ BUILDER_TEMPLATE = """
         document.addEventListener('DOMContentLoaded', () => {
             loadSchema();
             loadPresets();
+            
+            // Check for existing payload in sessionStorage (with delay to ensure it runs after schema loads)
+            const savedPayload = sessionStorage.getItem('payment_payload');
+            if (savedPayload) {
+                // Use setTimeout to ensure this runs after schema load completes
+                setTimeout(() => {
+                    try {
+                        // Format the JSON nicely and load into the JSON input
+                        const parsed = JSON.parse(savedPayload);
+                        document.getElementById('json-input').value = JSON.stringify(parsed, null, 2);
+                        
+                        // Switch to the JSON tab
+                        switchTab('json');
+                        
+                        // Update the preview
+                        document.getElementById('json-preview').textContent = JSON.stringify(parsed, null, 2);
+                        
+                        // Show a notice that payload was loaded
+                        const validation = document.getElementById('json-validation');
+                        validation.className = 'validation-msg success';
+                        validation.textContent = 'Payload loaded from Test Runner. Edit as needed and click "Use This Payload" to save changes.';
+                    } catch (e) {
+                        console.error('Failed to load saved payload:', e);
+                    }
+                }, 100);
+            }
         });
         
         async function loadSchema() {
