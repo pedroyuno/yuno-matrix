@@ -15,6 +15,7 @@ from src.context import ExecutionContext, ContextError
 from src.models import Config, TestSuite, TestCase, Step, StepResult, TestCaseResult, APIRequest
 from src.schemas import CreatePaymentRequest, get_presets
 from src.schemas.schema_utils import schema_to_json
+from src.datadog_client import DatadogClient, get_datadog_client
 
 app = Flask(__name__)
 
@@ -1419,7 +1420,10 @@ HTML_TEMPLATE = """
                     quickInfoHtml = `<div class="quick-info">${items}</div>`;
                 }
                 
-                const errorHtml = stepResult?.error_message 
+                // Filter out JSONPath "did not match" errors from display
+                const shouldShowError = stepResult?.error_message && 
+                    !stepResult.error_message.includes('did not match any values');
+                const errorHtml = shouldShowError
                     ? `<div class="step-error-msg">${stepResult.error_message}</div>` 
                     : '';
                 
@@ -1614,7 +1618,10 @@ HTML_TEMPLATE = """
                         quickInfoHtml = `<div class="quick-info">${items}</div>`;
                     }
                     
-                    const errorHtml = stepResult?.error_message 
+                    // Filter out JSONPath "did not match" errors from display
+                    const shouldShowError = stepResult?.error_message && 
+                        !stepResult.error_message.includes('did not match any values');
+                    const errorHtml = shouldShowError
                         ? `<div class="step-error-msg">${stepResult.error_message}</div>` 
                         : '';
                     
@@ -2050,8 +2057,8 @@ HTML_TEMPLATE = """
                             }
                         }
                         
-                        // Add error message if present
-                        if (stepResult.error_message) {
+                        // Add error message if present (filter out JSONPath "did not match" errors)
+                        if (stepResult.error_message && !stepResult.error_message.includes('did not match any values')) {
                             const errBodyEl = stepEl.querySelector('.step-detail-body');
                             if (errBodyEl && !errBodyEl.querySelector('.step-error-msg')) {
                                 errBodyEl.insertAdjacentHTML('beforeend', `
@@ -2700,6 +2707,61 @@ def get_payment_presets():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/datadog/query', methods=['POST'])
+def query_datadog():
+    """Query Datadog logs to retrieve payment request payload by trace_id."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No data provided'
+            }), 400
+        
+        trace_id = data.get('trace_id')
+        if not trace_id:
+            return jsonify({
+                'success': False,
+                'error': 'trace_id is required'
+            }), 400
+        
+        # Get optional date range
+        date_from = data.get('date_from')
+        date_to = data.get('date_to')
+        
+        # Get Datadog client
+        client = get_datadog_client()
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Datadog API not configured. Please set DD_API_KEY and DD_APP_KEY environment variables.'
+            }), 500
+        
+        # Query Datadog
+        result = client.search_by_trace_id(
+            trace_id=trace_id,
+            date_from=date_from,
+            date_to=date_to
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/datadog/status')
+def datadog_status():
+    """Check if Datadog API is configured."""
+    client = get_datadog_client()
+    return jsonify({
+        'configured': client is not None
+    })
+
+
 @app.route('/builder')
 def payment_builder():
     """Serve the Payment Request Builder page."""
@@ -3165,6 +3227,7 @@ BUILDER_TEMPLATE = """
         <div class="tabs">
             <div class="tab active" onclick="switchTab('interactive')">Interactive Form</div>
             <div class="tab" onclick="switchTab('json')">Paste JSON</div>
+            <div class="tab" onclick="switchTab('datadog')">Query Datadog</div>
         </div>
         
         <div class="builder-layout">
@@ -3192,6 +3255,80 @@ BUILDER_TEMPLATE = """
                             <button class="btn btn-secondary" onclick="formatJson()">Format JSON</button>
                         </div>
                         <div id="json-validation" class="validation-msg"></div>
+                    </div>
+                </div>
+                
+                <!-- Datadog Query Tab -->
+                <div id="tab-datadog" class="tab-content">
+                    <div class="card">
+                        <h2>Query Payment from Datadog</h2>
+                        <p style="color: #666; margin-bottom: 20px;">
+                            Retrieve a payment request payload from Datadog logs using the trace ID.
+                        </p>
+                        
+                        <div id="datadog-not-configured" style="display: none; padding: 16px; background: #fef3c7; border-radius: 8px; margin-bottom: 16px;">
+                            <strong style="color: #92400e;">Datadog API not configured</strong>
+                            <p style="color: #92400e; margin-top: 4px; font-size: 0.9rem;">
+                                Please set DD_API_KEY and DD_APP_KEY environment variables.
+                            </p>
+                        </div>
+                        
+                        <div id="datadog-form">
+                            <div class="field-row" style="border-bottom: none; padding-bottom: 0;">
+                                <div class="field-content">
+                                    <div class="field-label">
+                                        <span class="field-label-text">Trace ID</span>
+                                        <span class="required-star">*</span>
+                                    </div>
+                                    <div class="field-description">The trace_id (UUID) from the payment request</div>
+                                    <div class="field-input">
+                                        <input type="text" id="datadog-trace-id" placeholder="e.g., bd22795e-f66c-477c-9e12-dce2259ceac4">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+                                <div class="field-row" style="border-bottom: none; padding: 0;">
+                                    <div class="field-content">
+                                        <div class="field-label">
+                                            <span class="field-label-text">Date From</span>
+                                        </div>
+                                        <div class="field-description">Start of date range (defaults to 7 days ago)</div>
+                                        <div class="field-input">
+                                            <input type="date" id="datadog-date-from">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="field-row" style="border-bottom: none; padding: 0;">
+                                    <div class="field-content">
+                                        <div class="field-label">
+                                            <span class="field-label-text">Date To</span>
+                                        </div>
+                                        <div class="field-description">End of date range (defaults to now)</div>
+                                        <div class="field-input">
+                                            <input type="date" id="datadog-date-to">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="actions" style="margin-top: 20px;">
+                                <button class="btn btn-primary" onclick="queryDatadog()" id="datadog-query-btn">
+                                    Fetch Payload
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="datadog-validation" class="validation-msg"></div>
+                        
+                        <div id="datadog-result" style="display: none; margin-top: 20px;">
+                            <h3 style="font-size: 1rem; color: #1a1a2e; margin-bottom: 12px;">Retrieved Payload</h3>
+                            <div id="datadog-payload-preview" class="json-preview" style="max-height: 300px;"></div>
+                            <div class="actions" style="margin-top: 12px;">
+                                <button class="btn btn-success" onclick="useDatadogPayload()">Use This Payload</button>
+                                <button class="btn btn-secondary" onclick="copyDatadogPayload()">Copy JSON</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3576,8 +3713,162 @@ BUILDER_TEMPLATE = """
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             
-            document.querySelector(`.tab:nth-child(${tab === 'interactive' ? 1 : 2})`).classList.add('active');
+            const tabIndex = tab === 'interactive' ? 1 : (tab === 'json' ? 2 : 3);
+            document.querySelector('.tab:nth-child(' + tabIndex + ')').classList.add('active');
             document.getElementById('tab-' + tab).classList.add('active');
+            
+            // Check Datadog config when switching to Datadog tab
+            if (tab === 'datadog') {
+                checkDatadogStatus();
+            }
+        }
+        
+        async function checkDatadogStatus() {
+            try {
+                const response = await fetch('/api/datadog/status');
+                const data = await response.json();
+                
+                const notConfigured = document.getElementById('datadog-not-configured');
+                const form = document.getElementById('datadog-form');
+                
+                if (!data.configured) {
+                    notConfigured.style.display = 'block';
+                    form.style.opacity = '0.5';
+                    form.style.pointerEvents = 'none';
+                } else {
+                    notConfigured.style.display = 'none';
+                    form.style.opacity = '1';
+                    form.style.pointerEvents = 'auto';
+                }
+                
+                // Pre-fill date inputs with today's date
+                const today = new Date().toISOString().split('T')[0];
+                const dateFrom = document.getElementById('datadog-date-from');
+                const dateTo = document.getElementById('datadog-date-to');
+                if (dateFrom && !dateFrom.value) dateFrom.value = today;
+                if (dateTo && !dateTo.value) dateTo.value = today;
+                
+            } catch (error) {
+                console.error('Failed to check Datadog status:', error);
+            }
+        }
+        
+        async function queryDatadog() {
+            const traceId = document.getElementById('datadog-trace-id').value.trim();
+            const dateFrom = document.getElementById('datadog-date-from').value;
+            const dateTo = document.getElementById('datadog-date-to').value;
+            const validation = document.getElementById('datadog-validation');
+            const resultDiv = document.getElementById('datadog-result');
+            const btn = document.getElementById('datadog-query-btn');
+            
+            if (!traceId) {
+                validation.className = 'validation-msg error';
+                validation.style.display = 'block';
+                validation.textContent = 'Please enter a trace ID';
+                return;
+            }
+            
+            // UUID validation
+            const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidPattern.test(traceId)) {
+                validation.className = 'validation-msg error';
+                validation.style.display = 'block';
+                validation.textContent = 'Invalid trace ID format. Expected UUID format (e.g., bd22795e-f66c-477c-9e12-dce2259ceac4)';
+                return;
+            }
+            
+            // Show loading state
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+            validation.style.display = 'none';
+            resultDiv.style.display = 'none';
+            
+            try {
+                const body = { trace_id: traceId };
+                
+                // Add date range if provided
+                if (dateFrom) {
+                    body.date_from = dateFrom + 'T00:00:00Z';
+                }
+                if (dateTo) {
+                    body.date_to = dateTo + 'T23:59:59Z';
+                }
+                
+                const response = await fetch('/api/datadog/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.payload) {
+                    // Show success
+                    validation.className = 'validation-msg success';
+                    validation.style.display = 'block';
+                    validation.textContent = 'Found payload! (' + result.logs_count + ' logs searched)';
+                    
+                    // Show the payload
+                    const previewDiv = document.getElementById('datadog-payload-preview');
+                    previewDiv.textContent = JSON.stringify(result.payload, null, 2);
+                    resultDiv.style.display = 'block';
+                    
+                    // Also update main preview
+                    document.getElementById('json-preview').textContent = JSON.stringify(result.payload, null, 2);
+                } else {
+                    validation.className = 'validation-msg error';
+                    validation.style.display = 'block';
+                    validation.textContent = result.error || 'Failed to retrieve payload';
+                    
+                    // Show raw logs for debugging if available
+                    if (result.raw_logs && result.raw_logs.length > 0) {
+                        const previewDiv = document.getElementById('datadog-payload-preview');
+                        previewDiv.textContent = '// RAW LOGS (for debugging):\\n' + JSON.stringify(result.raw_logs, null, 2);
+                        resultDiv.style.display = 'block';
+                        validation.textContent += ' - See raw logs below (' + result.logs_count + ' logs found)';
+                    } else {
+                        resultDiv.style.display = 'none';
+                    }
+                }
+                
+            } catch (error) {
+                validation.className = 'validation-msg error';
+                validation.style.display = 'block';
+                validation.textContent = 'Request failed: ' + error.message;
+                resultDiv.style.display = 'none';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Fetch Payload';
+            }
+        }
+        
+        function useDatadogPayload() {
+            const previewContent = document.getElementById('datadog-payload-preview').textContent;
+            
+            try {
+                const payload = JSON.parse(previewContent);
+                
+                // Store in sessionStorage for use in test runner
+                sessionStorage.setItem('payment_payload', JSON.stringify(payload));
+                
+                // Update main preview
+                document.getElementById('json-preview').textContent = JSON.stringify(payload, null, 2);
+                
+                const validation = document.getElementById('datadog-validation');
+                validation.className = 'validation-msg success';
+                validation.textContent = 'Payload saved! You can now use it in the Test Runner.';
+            } catch (e) {
+                const validation = document.getElementById('datadog-validation');
+                validation.className = 'validation-msg error';
+                validation.textContent = 'Cannot save: Invalid JSON';
+            }
+        }
+        
+        function copyDatadogPayload() {
+            const preview = document.getElementById('datadog-payload-preview');
+            navigator.clipboard.writeText(preview.textContent).then(() => {
+                alert('Copied to clipboard!');
+            });
         }
         
         function parseJsonInput() {
