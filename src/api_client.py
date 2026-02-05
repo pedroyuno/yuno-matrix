@@ -184,13 +184,69 @@ class APIClient:
                 request_url=url
             )
 
+    def _replace_card_data_for_provider(self, provider: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Replace card data with provider-specific test card if configured.
+        
+        Only replaces direct card data - does not touch vaulted tokens or one-time tokens.
+        If no provider-specific card is configured, returns data unchanged.
+        
+        Args:
+            provider: Provider identifier
+            data: Payment data that may contain card_data
+            
+        Returns:
+            Data with card_data replaced if provider has a test card configured
+        """
+        # Skip if no provider test cards configured
+        if not hasattr(self.config, 'provider_test_cards') or not self.config.provider_test_cards:
+            return data
+        
+        provider_cards = self.config.provider_test_cards
+        provider_key = provider.lower()
+        
+        # Check if provider has a test card configured
+        if provider_key not in provider_cards:
+            return data
+        
+        # Check if this is a token-based payment (skip replacement)
+        payment_method = data.get("payment_method", {})
+        
+        # Check for vaulted_token at payment_method level
+        if payment_method.get("vaulted_token"):
+            return data
+        
+        detail = payment_method.get("detail", {})
+        
+        # Check for vaulted_token in detail.token
+        if detail.get("token", {}).get("vaulted_token"):
+            return data
+        
+        # Check if card_data exists (direct card payment)
+        card = detail.get("card", {})
+        if "card_data" not in card:
+            return data
+        
+        # Replace card data with provider-specific test card
+        test_card = provider_cards[provider_key]
+        data["payment_method"]["detail"]["card"]["card_data"] = {
+            "number": test_card.number,
+            "expiration_month": test_card.expiration_month,
+            "expiration_year": test_card.expiration_year,
+            "security_code": test_card.security_code,
+            "holder_name": test_card.holder_name
+        }
+        
+        return data
+
     def payment(self, provider: str, data: Dict[str, Any]) -> APIResponse:
         """
         Execute a Yuno payment operation (authorize + capture in one step).
 
-        The user's JSON payload is sent as-is, with only two modifications:
+        The user's JSON payload is sent as-is, with the following modifications:
         1. account_id is added if not present (required by Yuno API)
         2. provider metadata is updated to match the provider being tested
+        3. card_data is replaced with provider-specific test card (if configured)
 
         Args:
             provider: Provider identifier (can be passed in metadata)
@@ -205,6 +261,10 @@ class APIClient:
         # Only add account_id if not present (required by Yuno API)
         if "account_id" not in data and self.yuno_account_id:
             data["account_id"] = self.yuno_account_id
+
+        # Replace card data with provider-specific test card (if configured)
+        # This only affects direct card payments, not vaulted tokens or one-time tokens
+        data = self._replace_card_data_for_provider(provider, data)
 
         # Update provider in metadata to match the provider being tested
         if provider and provider.lower() != "yuno":

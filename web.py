@@ -12,7 +12,7 @@ from src.test_generator import TestCaseGenerator, GeneratorConfig
 from src.api_client import APIClient
 from src.logger import CertificationLogger
 from src.context import ExecutionContext, ContextError
-from src.models import Config, TestSuite, TestCase, Step, StepResult, TestCaseResult, APIRequest
+from src.models import Config, TestSuite, TestCase, Step, StepResult, TestCaseResult, APIRequest, ProviderTestCard
 from src.schemas import CreatePaymentRequest, get_presets
 from src.schemas.schema_utils import schema_to_json
 from src.datadog_client import DatadogClient, get_datadog_client
@@ -21,6 +21,9 @@ app = Flask(__name__)
 
 # Store uploaded test suites in memory (for simplicity)
 uploaded_suites = {}
+
+# Store provider test cards per suite (suite_id -> {provider_id: ProviderTestCard})
+provider_test_cards_storage = {}
 
 def load_config(config_path: str = "config/config.json") -> Config:
     """Load configuration from file."""
@@ -848,6 +851,80 @@ HTML_TEMPLATE = """
             color: #4f46e5;
             font-weight: 500;
         }
+        
+        /* Inline Provider Card Input Styles */
+        .provider-card-inputs {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 12px 0 12px 40px;
+            display: none;
+        }
+        
+        .provider-card-inputs.visible {
+            display: block;
+        }
+        
+        .provider-card-inputs-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .provider-card-inputs-title::before {
+            content: "💳";
+        }
+        
+        .card-inputs-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1.5fr;
+            gap: 10px;
+            align-items: end;
+        }
+        
+        .card-input-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .card-input-field label {
+            font-size: 0.75rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .card-input-field input {
+            padding: 8px 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            background: white;
+        }
+        
+        .card-input-field input:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+        }
+        
+        .card-input-field input::placeholder {
+            color: #94a3b8;
+        }
+        
+        @media (max-width: 900px) {
+            .card-inputs-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            .card-inputs-grid .card-input-field:first-child {
+                grid-column: 1 / -1;
+            }
+        }
     </style>
 </head>
 <body>
@@ -972,6 +1049,121 @@ HTML_TEMPLATE = """
         let testResults = {};
         let summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
         let selectedTestCases = new Set();
+        let providerTestCards = {};  // {providerId: {number, expiration_month, expiration_year, security_code, holder_name}}
+        
+        // Inline Provider Card Input Functions
+        function renderProviderCardInputs(providerId, paymentMethodId) {
+            const card = providerTestCards[providerId] || {};
+            return `
+                <div class="provider-card-inputs" id="card-inputs-${paymentMethodId}-${providerId}">
+                    <div class="provider-card-inputs-title">Test Card for this Provider</div>
+                    <div class="card-inputs-grid">
+                        <div class="card-input-field">
+                            <label>Card Number</label>
+                            <input type="text" id="card-number-${providerId}" 
+                                   value="${card.number || ''}" 
+                                   placeholder="4111111111111111"
+                                   onchange="updateProviderCard('${providerId}')">
+                        </div>
+                        <div class="card-input-field">
+                            <label>Month</label>
+                            <input type="number" id="card-exp-month-${providerId}" 
+                                   value="${card.expiration_month || ''}" 
+                                   placeholder="12" min="1" max="12"
+                                   onchange="updateProviderCard('${providerId}')">
+                        </div>
+                        <div class="card-input-field">
+                            <label>Year</label>
+                            <input type="number" id="card-exp-year-${providerId}" 
+                                   value="${card.expiration_year || ''}" 
+                                   placeholder="27"
+                                   onchange="updateProviderCard('${providerId}')">
+                        </div>
+                        <div class="card-input-field">
+                            <label>CVV</label>
+                            <input type="text" id="card-cvv-${providerId}" 
+                                   value="${card.security_code || ''}" 
+                                   placeholder="123" maxlength="4"
+                                   onchange="updateProviderCard('${providerId}')">
+                        </div>
+                        <div class="card-input-field">
+                            <label>Holder Name</label>
+                            <input type="text" id="card-holder-${providerId}" 
+                                   value="${card.holder_name || ''}" 
+                                   placeholder="TEST USER"
+                                   onchange="updateProviderCard('${providerId}')">
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function updateProviderCard(providerId) {
+            const numberEl = document.getElementById(`card-number-${providerId}`);
+            if (!numberEl) return;
+            
+            const number = numberEl.value.trim();
+            if (number) {
+                providerTestCards[providerId] = {
+                    number: number,
+                    expiration_month: parseInt(document.getElementById(`card-exp-month-${providerId}`)?.value) || 12,
+                    expiration_year: parseInt(document.getElementById(`card-exp-year-${providerId}`)?.value) || 27,
+                    security_code: document.getElementById(`card-cvv-${providerId}`)?.value.trim() || '123',
+                    holder_name: document.getElementById(`card-holder-${providerId}`)?.value.trim() || 'TEST USER'
+                };
+            } else {
+                delete providerTestCards[providerId];
+            }
+            
+            // Save to sessionStorage
+            sessionStorage.setItem('provider_test_cards', JSON.stringify(providerTestCards));
+        }
+        
+        function showProviderCardInputs(paymentMethodId, providerId) {
+            const inputsEl = document.getElementById(`card-inputs-${paymentMethodId}-${providerId}`);
+            if (inputsEl) {
+                inputsEl.classList.add('visible');
+            }
+        }
+        
+        function hideProviderCardInputs(paymentMethodId, providerId) {
+            const inputsEl = document.getElementById(`card-inputs-${paymentMethodId}-${providerId}`);
+            if (inputsEl) {
+                inputsEl.classList.remove('visible');
+            }
+        }
+        
+        function updateCardInputsVisibility() {
+            // Show/hide card inputs based on selected providers
+            if (!currentHierarchy) return;
+            
+            currentHierarchy.forEach(pm => {
+                if (pm.id.toUpperCase() === 'CARD') {
+                    pm.providers.forEach(provider => {
+                        const providerTestIds = provider.test_cases.map(tc => tc.id);
+                        const isSelected = providerTestIds.some(id => selectedTestCases.has(id));
+                        
+                        if (isSelected) {
+                            showProviderCardInputs(pm.id, provider.id);
+                        } else {
+                            hideProviderCardInputs(pm.id, provider.id);
+                        }
+                    });
+                }
+            });
+        }
+        
+        // Load saved provider test cards on page load
+        function loadSavedProviderCards() {
+            const saved = sessionStorage.getItem('provider_test_cards');
+            if (saved) {
+                try {
+                    providerTestCards = JSON.parse(saved);
+                } catch (e) {
+                    providerTestCards = {};
+                }
+            }
+        }
         
         // Check for saved payload from builder on page load
         document.addEventListener('DOMContentLoaded', () => {
@@ -979,6 +1171,8 @@ HTML_TEMPLATE = """
             if (savedPayload) {
                 document.getElementById('saved-payload-notice').classList.remove('hidden');
             }
+            // Load saved provider test cards
+            loadSavedProviderCards();
         });
         
         // Builder integration functions
@@ -1275,6 +1469,8 @@ HTML_TEMPLATE = """
                     const providerTestIds = provider.test_cases.map(tc => tc.id);
                     const providerAllSelected = providerTestIds.every(id => selectedTestCases.has(id));
                     const providerSomeSelected = providerTestIds.some(id => selectedTestCases.has(id));
+                    const isCardProvider = pm.id.toUpperCase() === 'CARD';
+                    const showCardInputs = isCardProvider && providerSomeSelected;
                     
                     html += `
                         <div class="hierarchy-group provider-group" id="provider-${pm.id}-${provider.id}">
@@ -1291,6 +1487,7 @@ HTML_TEMPLATE = """
                                 <span class="hierarchy-name">${provider.name}</span>
                                 <span class="hierarchy-count">${provider.test_cases.length} tests</span>
                             </div>
+                            ${isCardProvider ? renderProviderCardInputs(provider.id, pm.id).replace('class="provider-card-inputs"', `class="provider-card-inputs${showCardInputs ? ' visible' : ''}"`) : ''}
                             <div class="hierarchy-children">
                     `;
                     
@@ -1720,6 +1917,7 @@ HTML_TEMPLATE = """
             updateHierarchyCheckboxes();
             updateSelectionCount();
             updateSelectAllCheckbox();
+            updateCardInputsVisibility();
         }
         
         function togglePaymentMethodSelection(pmId) {
@@ -1750,6 +1948,7 @@ HTML_TEMPLATE = """
             updateHierarchyCheckboxes();
             updateSelectionCount();
             updateSelectAllCheckbox();
+            updateCardInputsVisibility();
         }
         
         function toggleProviderSelection(pmId, providerId) {
@@ -1779,6 +1978,7 @@ HTML_TEMPLATE = """
             updateHierarchyCheckboxes();
             updateSelectionCount();
             updateSelectAllCheckbox();
+            updateCardInputsVisibility();
         }
         
         function updateHierarchyCheckboxes() {
@@ -1828,6 +2028,7 @@ HTML_TEMPLATE = """
             });
             updateHierarchyCheckboxes();
             updateSelectionCount();
+            updateCardInputsVisibility();
         }
         
         function updateSelectAllCheckbox() {
@@ -2125,6 +2326,64 @@ HTML_TEMPLATE = """
                 setupEventSource(eventSource);
             };
             
+            // Collect provider test cards from inline inputs
+            const collectProviderCards = () => {
+                if (!currentHierarchy) return;
+                
+                currentHierarchy.forEach(pm => {
+                    if (pm.id.toUpperCase() === 'CARD') {
+                        pm.providers.forEach(provider => {
+                            const providerTestIds = provider.test_cases.map(tc => tc.id);
+                            const isSelected = providerTestIds.some(id => selectedTestCases.has(id));
+                            
+                            if (isSelected) {
+                                // Collect card data from inline inputs if present
+                                const numberEl = document.getElementById(`card-number-${provider.id}`);
+                                if (numberEl && numberEl.value.trim()) {
+                                    providerTestCards[provider.id] = {
+                                        number: numberEl.value.trim(),
+                                        expiration_month: parseInt(document.getElementById(`card-exp-month-${provider.id}`)?.value) || 12,
+                                        expiration_year: parseInt(document.getElementById(`card-exp-year-${provider.id}`)?.value) || 27,
+                                        security_code: document.getElementById(`card-cvv-${provider.id}`)?.value.trim() || '123',
+                                        holder_name: document.getElementById(`card-holder-${provider.id}`)?.value.trim() || 'TEST USER'
+                                    };
+                                }
+                            }
+                        });
+                    }
+                });
+                
+                // Save to sessionStorage
+                sessionStorage.setItem('provider_test_cards', JSON.stringify(providerTestCards));
+            };
+            
+            // Function to send provider test cards to backend
+            const sendProviderCards = async () => {
+                // First collect cards from inline inputs
+                collectProviderCards();
+                
+                if (Object.keys(providerTestCards).length > 0) {
+                    try {
+                        const response = await fetch('/api/update-provider-cards', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ suite_id: currentSuiteId, cards: providerTestCards })
+                        });
+                        const data = await response.json();
+                        if (data.error) {
+                            console.error('Failed to apply provider cards:', data.error);
+                        } else {
+                            console.log('Provider cards applied:', data.message);
+                        }
+                    } catch (error) {
+                        console.error('Error applying provider cards:', error);
+                    }
+                }
+            };
+            
+            // Send provider cards first, then payload, then start execution
+            await sendProviderCards();
+            
             // If we have a saved payload, send it to the backend first
             if (savedPayload) {
                 try {
@@ -2419,6 +2678,48 @@ def update_payload():
     return jsonify({'success': True, 'message': f'Payload applied to {len(test_suite.test_cases)} test cases'})
 
 
+@app.route('/api/update-provider-cards', methods=['POST'])
+def update_provider_cards():
+    """
+    Update provider-specific test cards for a test suite.
+    
+    These cards will be used instead of the default card from the Builder payload
+    when making payment API calls to specific providers.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    suite_id = data.get('suite_id')
+    cards = data.get('cards', {})  # {provider_id: {number, expiration_month, expiration_year, security_code, holder_name}}
+    
+    if not suite_id or suite_id not in uploaded_suites:
+        return jsonify({'error': 'Test suite not found'}), 404
+    
+    # Validate and store provider test cards
+    validated_cards = {}
+    for provider_id, card_data in cards.items():
+        if card_data and card_data.get('number'):  # Only store if card number is provided
+            try:
+                validated_cards[provider_id.lower()] = ProviderTestCard(
+                    number=card_data.get('number', ''),
+                    expiration_month=int(card_data.get('expiration_month', 12)),
+                    expiration_year=int(card_data.get('expiration_year', 27)),
+                    security_code=card_data.get('security_code', '123'),
+                    holder_name=card_data.get('holder_name', 'TEST USER')
+                )
+            except Exception as e:
+                return jsonify({'error': f'Invalid card data for provider {provider_id}: {str(e)}'}), 400
+    
+    provider_test_cards_storage[suite_id] = validated_cards
+    
+    return jsonify({
+        'success': True, 
+        'message': f'Test cards configured for {len(validated_cards)} providers',
+        'providers': list(validated_cards.keys())
+    })
+
+
 def execute_test_case_streaming(test_case: TestCase, api_client: APIClient, 
                                  context: ExecutionContext, logger: CertificationLogger) -> TestCaseResult:
     """Execute a single test case and return result."""
@@ -2574,6 +2875,10 @@ def execute_stream():
         try:
             # Load config
             config = load_config()
+            
+            # Merge provider test cards from storage into config
+            if suite_id in provider_test_cards_storage:
+                config.provider_test_cards = provider_test_cards_storage[suite_id]
             
             # Generate execution ID
             execution_id = datetime.now().strftime("%Y%m%d_%H%M%S")

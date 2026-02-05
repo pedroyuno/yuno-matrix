@@ -182,7 +182,20 @@ class APIConfig(BaseModel):
     retry_attempts: int = Field(default=3, ge=0, description="Number of retry attempts")
 
 
+class ProviderTestCard(BaseModel):
+    """Test card configuration for a specific provider."""
+    number: str = Field(..., description="Card number (PAN)")
+    expiration_month: int = Field(..., ge=1, le=12, description="Card expiration month (1-12)")
+    expiration_year: int = Field(..., ge=0, description="Card expiration year (2-digit or 4-digit)")
+    security_code: str = Field(..., description="Card security code (CVV/CVC)")
+    holder_name: str = Field(..., description="Cardholder name")
+
+
 class Config(BaseModel):
     """Main application configuration."""
     api: APIConfig = Field(default_factory=APIConfig, description="API configuration")
     placeholder_mode: bool = Field(default=True, description="Use placeholder/mock API responses")
+    provider_test_cards: Dict[str, ProviderTestCard] = Field(
+        default_factory=dict,
+        description="Provider-specific test cards (provider name -> card data)"
+    )
