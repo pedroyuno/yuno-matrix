@@ -3,6 +3,7 @@
 
 import json
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, send_file, Response
@@ -1401,10 +1402,11 @@ HTML_TEMPLATE = """
                 if (savedPayload) {
                     try {
                         const payload = JSON.parse(savedPayload);
-                        // Apply to first step of all test cases
+                        // Apply deep copy to first step of each test case to avoid shared references
+                        // (currentSuite.test_cases and hierarchy test cases share the same objects)
                         currentSuite.test_cases.forEach(tc => {
                             if (tc.steps.length > 0) {
-                                tc.steps[0].input_data = payload;
+                                tc.steps[0].input_data = JSON.parse(JSON.stringify(payload));
                             }
                         });
                         // Show the notice in the test cases section
@@ -2159,6 +2161,17 @@ HTML_TEMPLATE = """
                             ${stepResult.duration_ms ? `<span style="color:#888;font-size:0.8rem;margin-left:8px">${stepResult.duration_ms}ms</span>` : ''}
                         `);
                     }
+                    
+                        // Update the Request section with the actual request body sent to the API
+                        if (stepResult.request_body) {
+                            const bodyEl = stepEl.querySelector('.step-detail-body');
+                            if (bodyEl) {
+                                const requestSection = bodyEl.querySelector('.step-section .collapsible-content .step-data');
+                                if (requestSection) {
+                                    requestSection.textContent = JSON.stringify(stepResult.request_body, null, 2);
+                                }
+                            }
+                        }
                         
                         // Add response status and body sections
                         console.log('[DEBUG] Step', stepResult.step_id, 'response_status:', stepResult.response_status, 'response_body:', stepResult.response_body);
@@ -2664,6 +2677,10 @@ def update_payload():
             
             # Get the provider from the test case's first step
             provider = test_case.steps[0].provider
+            
+            # Generate a unique merchant_order_id for each test case
+            # This prevents duplicate order ID errors across providers
+            step_payload["merchant_order_id"] = str(uuid.uuid4())
             
             # Update only the provider in metadata
             if "metadata" not in step_payload:

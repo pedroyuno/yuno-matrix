@@ -273,6 +273,10 @@ class APIClient:
         if "account_id" not in data and self.yuno_account_id:
             data["account_id"] = self.yuno_account_id
 
+        # Always generate a unique merchant_order_id to prevent duplicate order errors
+        # across providers and re-runs
+        data["merchant_order_id"] = str(uuid.uuid4())
+
         # Replace card data with provider-specific test card (if configured)
         # This only affects direct card payments, not vaulted tokens or one-time tokens
         data = self._replace_card_data_for_provider(provider, data)
