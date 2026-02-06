@@ -9,19 +9,19 @@ Replace static `input_data` in test case JSON files with three input methods:
 
 ---
 
-## Current Status: Phase 1 - Interactive Input Implementation
+## Current Status: Phase 1 Complete, Phases 2 & 3 Mostly Complete
 
 ### Goal
 Create a UI that allows users to select which API parameters to send and input their values, based on the Yuno Create Payment API specification.
 
 ---
 
-## Phase 1: Interactive Input Implementation
+## Phase 1: Interactive Input Implementation ✅
 
-### Step 1.1: Create API Schema Definition ⬜
-- [ ] Create `/src/schemas/create_payment.py` with Pydantic models matching the Create Payment API
-- [ ] Define all required and optional fields with their types, constraints, and defaults
-- [ ] Include nested objects: `amount`, `customer_payer`, `payment_method`, `billing_address`, etc.
+### Step 1.1: Create API Schema Definition ✅
+- [x] Create `/src/schemas/create_payment.py` with Pydantic models matching the Create Payment API
+- [x] Define all required and optional fields with their types, constraints, and defaults
+- [x] Include nested objects: `amount`, `customer_payer`, `payment_method`, `billing_address`, etc.
 
 **Key fields from Yuno Create Payment API:**
 
@@ -46,23 +46,23 @@ Create a UI that allows users to select which API parameters to send and input t
 - `payment_method`: { type, detail.card, detail.token, ... }
 - `payment_method.detail.card`: { number, expiration_month, expiration_year, security_code, holder_name, ... }
 
-### Step 1.2: Create Schema Metadata Generator ⬜
-- [ ] Create `/src/schemas/schema_utils.py` to generate UI-friendly metadata from Pydantic models
-- [ ] Include field labels, types, validation rules, nested structure, enum options
-- [ ] Support marking fields as "commonly used" vs "advanced"
+### Step 1.2: Create Schema Metadata Generator ✅
+- [x] Create `/src/schemas/schema_utils.py` to generate UI-friendly metadata from Pydantic models
+- [x] Include field labels, types, validation rules, nested structure, enum options
+- [x] Support marking fields as "commonly used" vs "advanced"
 
-### Step 1.3: Create Interactive Form API Endpoints ⬜
-- [ ] `GET /api/payment-schema` - Return the complete schema for the form builder
-- [ ] Include field definitions, nesting, validation rules, and groupings
-- [ ] Support field filtering by type/category
+### Step 1.3: Create Interactive Form API Endpoints ✅
+- [x] `GET /api/payment-schema` - Return the complete schema for the form builder
+- [x] Include field definitions, nesting, validation rules, and groupings
+- [x] Support field filtering by type/category
 
-### Step 1.4: Build Interactive Form UI ⬜
-- [ ] Create collapsible sections for object groups (Amount, Customer, Payment Method, etc.)
-- [ ] Add checkbox to enable/disable each field
-- [ ] Dynamic field inputs based on type (text, number, select for enums)
-- [ ] Show required vs optional fields clearly
-- [ ] Add validation feedback in real-time
-- [ ] Support nested object expansion/collapse
+### Step 1.4: Build Interactive Form UI ✅
+- [x] Create collapsible sections for object groups (Amount, Customer, Payment Method, etc.)
+- [x] Add checkbox to enable/disable each field
+- [x] Dynamic field inputs based on type (text, number, select for enums)
+- [x] Show required vs optional fields clearly
+- [x] Add validation feedback in real-time
+- [x] Support nested object expansion/collapse
 
 **UI Components Needed:**
 ```
@@ -100,31 +100,36 @@ Create a UI that allows users to select which API parameters to send and input t
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Step 1.5: Integrate Form with Test Case Creation ⬜
-- [ ] Allow building `input_data` via the interactive form
-- [ ] Store the constructed payload in test case step
-- [ ] Support editing existing input_data through the form
-- [ ] Add "Preview JSON" button to see final payload
+### Step 1.5: Integrate Form with Test Case Creation ✅
+- [x] Allow building `input_data` via the interactive form
+- [x] Store the constructed payload in test case step (via sessionStorage)
+- [x] Support editing existing input_data through the form
+- [x] Add "Preview JSON" button to see final payload
 
-### Step 1.6: Add Presets/Templates ⬜
-- [ ] Create common payment templates (Brazil Card Payment, PIX, Boleto, etc.)
+### Step 1.6: Add Presets/Templates ✅
+- [x] Create common payment templates (Brazil Card, PIX, Mexico, Colombia, Installments, Minimal)
 - [ ] Allow saving custom presets
-- [ ] Quick-fill from template
+- [x] Quick-fill from template
 
 ---
 
-## Phase 2: JSON Paste Input (Future)
-- [ ] Add "Paste JSON" tab alongside interactive form
-- [ ] JSON editor with syntax highlighting
-- [ ] Validate pasted JSON against schema
-- [ ] Parse and populate interactive form from pasted JSON
+## Phase 2: JSON Paste Input 🔄 (Mostly Complete)
+- [x] Add "Paste JSON" tab alongside interactive form
+- [ ] JSON editor with syntax highlighting (currently plain textarea with monospace font)
+- [x] Validate pasted JSON against schema (via `parseJsonInput()` calling `/api/validate-payment`)
+- [x] Format JSON button for pretty-printing pasted input
+- [ ] Parse and populate interactive form from pasted JSON (pasted JSON updates preview but does NOT populate the interactive form fields)
 
 ---
 
-## Phase 3: Datadog Query Integration (Future)
-- [ ] Query Datadog logs for payment requests
-- [ ] Parse and import as test case input_data
-- [ ] Filter by date, merchant, payment status
+## Phase 3: Datadog Query Integration 🔄 (Mostly Complete)
+- [x] Query Datadog logs for payment requests (via `/api/datadog/query` endpoint with `DatadogClient`)
+- [x] Parse and import as test case input_data ("Use This Payload" saves to sessionStorage)
+- [x] "Query Datadog" tab in builder with trace ID input and status check
+- [x] `/api/datadog/status` endpoint to check if API keys are configured
+- [x] Filter by date range (date_from, date_to)
+- [ ] Filter by merchant
+- [ ] Filter by payment status
 
 ---
 
@@ -265,7 +270,9 @@ The Yuno Create Payment API schema (from https://docs.y.uno/reference/create-pay
 | 1.3 | Create Interactive Form API Endpoints | ✅ Complete |
 | 1.4 | Build Interactive Form UI | ✅ Complete |
 | 1.5 | Integrate Form with Test Case Creation | ✅ Complete |
-| 1.6 | Add Presets/Templates | ✅ Complete |
+| 1.6 | Add Presets/Templates | ✅ Complete (custom preset saving still pending) |
+| 2.0 | JSON Paste Input | 🔄 Mostly Complete (syntax highlighting + form population pending) |
+| 3.0 | Datadog Query Integration | 🔄 Mostly Complete (merchant/status filters pending) |
 
 **Legend:** ⬜ Not Started | 🔄 In Progress | ✅ Complete
 
@@ -278,6 +285,7 @@ All interactive input features have been implemented:
 - `/src/schemas/create_payment.py` - Pydantic models for Create Payment API
 - `/src/schemas/schema_utils.py` - Schema-to-UI metadata generator
 - `/src/schemas/presets.py` - Payment presets/templates
+- `/src/datadog_client.py` - Datadog API client for log queries
 
 **Files Modified:**
 - `/web.py` - Added Payment Builder page, API endpoints, and integration
@@ -291,6 +299,8 @@ All interactive input features have been implemented:
 6. Integration with main test runner page
 7. "Use This Payload" to save for test creation
 8. "Quick Test from Builder" button on main page
+9. "Paste JSON" tab with validation and formatting
+10. "Query Datadog" tab with trace ID lookup, date filtering, and status check
 
 **How to Access:**
 - Start the server: `python web.py`
@@ -301,6 +311,23 @@ All interactive input features have been implemented:
 - `GET /api/payment-schema` - Returns schema for form generation
 - `GET /api/presets` - Returns available payment presets
 - `POST /api/validate-payment` - Validates a payment payload
+- `POST /api/datadog/query` - Query Datadog logs by trace_id
+- `GET /api/datadog/status` - Check if Datadog API is configured
+
+## Remaining Work
+
+The following items are still pending across phases:
+
+### Phase 1 Remaining
+- [ ] Allow saving custom presets (Step 1.6)
+
+### Phase 2 Remaining
+- [ ] JSON editor with syntax highlighting (currently plain textarea)
+- [ ] Parse pasted JSON and populate the interactive form fields (currently only updates preview)
+
+### Phase 3 Remaining
+- [ ] Filter Datadog queries by merchant
+- [ ] Filter Datadog queries by payment status
 
 ---
 
@@ -313,4 +340,4 @@ All interactive input features have been implemented:
 
 ---
 
-*Last Updated: 2026-01-30*
+*Last Updated: 2026-02-06*
