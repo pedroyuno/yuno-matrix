@@ -619,6 +619,16 @@ HTML_TEMPLATE = """
             word-break: break-all;
         }
         
+        a.quick-info-link {
+            color: #2563eb;
+            text-decoration: none;
+        }
+        
+        a.quick-info-link:hover {
+            text-decoration: underline;
+            color: #1d4ed8;
+        }
+        
         .copy-btn {
             background: none;
             border: 1px solid #d1d5db;
@@ -1606,21 +1616,24 @@ HTML_TEMPLATE = """
                 
                 // Build quick info section with payment_id and x-trace-id
                 let quickInfoHtml = '';
-                const paymentId = stepResult?.response_body?.id;
+                const paymentId = stepResult?.response_body?.payment?.id || stepResult?.response_body?.id;
                 const xTraceId = stepResult?.response_headers?.['x-trace-id'];
                 if (paymentId || xTraceId) {
                     let items = '';
                     if (paymentId) {
                         items += `<div class="quick-info-item">
                             <span class="quick-info-label">Payment ID</span>
-                            <span class="quick-info-value">${paymentId}</span>
+                            <a class="quick-info-value quick-info-link" href="https://dashboard.y.uno/payments/details/${paymentId}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${paymentId}</a>
                             <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${paymentId}', this)">Copy</button>
                         </div>`;
                     }
                     if (xTraceId) {
+                        const ddToTs = Date.now();
+                        const ddFromTs = ddToTs - 86400000;
+                        const ddUrl = `https://app.datadoghq.com/logs?query=%40trace_id%3A${xTraceId}&agg_m=count&agg_m_source=base&agg_t=count&cols=host%2Cservice&fromUser=true&messageDisplay=inline&refresh_mode=sliding&storage=hot&stream_sort=desc&viz=stream&from_ts=${ddFromTs}&to_ts=${ddToTs}&live=true`;
                         items += `<div class="quick-info-item">
                             <span class="quick-info-label">X-Trace-ID</span>
-                            <span class="quick-info-value">${xTraceId}</span>
+                            <a class="quick-info-value quick-info-link" href="${ddUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${xTraceId}</a>
                             <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${xTraceId}', this)">Copy</button>
                         </div>`;
                     }
@@ -1804,21 +1817,24 @@ HTML_TEMPLATE = """
                     
                     // Build quick info section with payment_id and x-trace-id
                     let quickInfoHtml = '';
-                    const paymentId = stepResult?.response_body?.id;
+                    const paymentId = stepResult?.response_body?.payment?.id || stepResult?.response_body?.id;
                     const xTraceId = stepResult?.response_headers?.['x-trace-id'];
                     if (paymentId || xTraceId) {
                         let items = '';
                         if (paymentId) {
                             items += `<div class="quick-info-item">
                                 <span class="quick-info-label">Payment ID</span>
-                                <span class="quick-info-value">${paymentId}</span>
+                                <a class="quick-info-value quick-info-link" href="https://dashboard.y.uno/payments/details/${paymentId}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${paymentId}</a>
                                 <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${paymentId}', this)">Copy</button>
                             </div>`;
                         }
                         if (xTraceId) {
+                            const ddToTs = Date.now();
+                            const ddFromTs = ddToTs - 86400000;
+                            const ddUrl = `https://app.datadoghq.com/logs?query=%40trace_id%3A${xTraceId}&agg_m=count&agg_m_source=base&agg_t=count&cols=host%2Cservice&fromUser=true&messageDisplay=inline&refresh_mode=sliding&storage=hot&stream_sort=desc&viz=stream&from_ts=${ddFromTs}&to_ts=${ddToTs}&live=true`;
                             items += `<div class="quick-info-item">
                                 <span class="quick-info-label">X-Trace-ID</span>
-                                <span class="quick-info-value">${xTraceId}</span>
+                                <a class="quick-info-value quick-info-link" href="${ddUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${xTraceId}</a>
                                 <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${xTraceId}', this)">Copy</button>
                             </div>`;
                         }
@@ -2242,7 +2258,7 @@ HTML_TEMPLATE = """
                         }
                         
                         // Update quick info section with payment_id and x-trace-id
-                        const paymentId = stepResult.response_body?.id;
+                        const paymentId = stepResult.response_body?.payment?.id || stepResult.response_body?.id;
                         const xTraceId = stepResult.response_headers?.['x-trace-id'];
                         if (paymentId || xTraceId) {
                             const bodyEl = stepEl.querySelector('.step-detail-body');
@@ -2253,14 +2269,17 @@ HTML_TEMPLATE = """
                             if (paymentId) {
                                 items += `<div class="quick-info-item">
                                     <span class="quick-info-label">Payment ID</span>
-                                    <span class="quick-info-value">${paymentId}</span>
+                                    <a class="quick-info-value quick-info-link" href="https://dashboard.y.uno/payments/details/${paymentId}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${paymentId}</a>
                                     <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${paymentId}', this)">Copy</button>
                                 </div>`;
                             }
                             if (xTraceId) {
+                                const ddToTs = Date.now();
+                                const ddFromTs = ddToTs - 86400000;
+                                const ddUrl = `https://app.datadoghq.com/logs?query=%40trace_id%3A${xTraceId}&agg_m=count&agg_m_source=base&agg_t=count&cols=host%2Cservice&fromUser=true&messageDisplay=inline&refresh_mode=sliding&storage=hot&stream_sort=desc&viz=stream&from_ts=${ddFromTs}&to_ts=${ddToTs}&live=true`;
                                 items += `<div class="quick-info-item">
                                     <span class="quick-info-label">X-Trace-ID</span>
-                                    <span class="quick-info-value">${xTraceId}</span>
+                                    <a class="quick-info-value quick-info-link" href="${ddUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${xTraceId}</a>
                                     <button class="copy-btn" onclick="event.stopPropagation(); copyValue('${xTraceId}', this)">Copy</button>
                                 </div>`;
                             }
