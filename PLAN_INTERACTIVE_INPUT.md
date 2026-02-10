@@ -122,14 +122,12 @@ Create a UI that allows users to select which API parameters to send and input t
 
 ---
 
-## Phase 3: Datadog Query Integration 🔄 (Mostly Complete)
+## Phase 3: Datadog Query Integration ✅
 - [x] Query Datadog logs for payment requests (via `/api/datadog/query` endpoint with `DatadogClient`)
 - [x] Parse and import as test case input_data ("Use This Payload" saves to sessionStorage)
 - [x] "Query Datadog" tab in builder with trace ID input and status check
 - [x] `/api/datadog/status` endpoint to check if API keys are configured
 - [x] Filter by date range (date_from, date_to)
-- [ ] Filter by merchant
-- [ ] Filter by payment status
 
 ---
 
@@ -272,7 +270,7 @@ The Yuno Create Payment API schema (from https://docs.y.uno/reference/create-pay
 | 1.5 | Integrate Form with Test Case Creation | ✅ Complete |
 | 1.6 | Add Presets/Templates | ✅ Complete (custom preset saving still pending) |
 | 2.0 | JSON Paste Input | 🔄 Mostly Complete (syntax highlighting + form population pending) |
-| 3.0 | Datadog Query Integration | 🔄 Mostly Complete (merchant/status filters pending) |
+| 3.0 | Datadog Query Integration | ✅ Complete |
 
 **Legend:** ⬜ Not Started | 🔄 In Progress | ✅ Complete
 
@@ -324,10 +322,6 @@ The following items are still pending across phases:
 ### Phase 2 Remaining
 - [ ] JSON editor with syntax highlighting (currently plain textarea)
 - [ ] Parse pasted JSON and populate the interactive form fields (currently only updates preview)
-
-### Phase 3 Remaining
-- [ ] Filter Datadog queries by merchant
-- [ ] Filter Datadog queries by payment status
 
 ---
 

@@ -180,6 +180,11 @@ class ScopingParser:
             provider = provider_row[col_idx].strip() if col_idx < len(provider_row) else ""
             payment_method = payment_method_row[col_idx].strip() if col_idx < len(payment_method_row) else ""
             
+            # Skip integrations with N/A payment method
+            if payment_method.upper() in ('#N/A', 'N/A', '#NA', 'NA', ''):
+                col_idx += 3
+                continue
+            
             if integration_id and provider:
                 integration = ProviderIntegration(
                     integration_id=integration_id,

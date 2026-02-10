@@ -2,11 +2,15 @@
 """MATRIX Web Interface - Simple web UI for test case execution."""
 
 import json
+import os
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
 from flask import Flask, render_template_string, request, jsonify, send_file, Response
+
+load_dotenv()
 
 from src.scoping_parser import ScopingParser, ScopingParseError
 from src.test_generator import TestCaseGenerator, GeneratorConfig
@@ -568,6 +572,36 @@ HTML_TEMPLATE = """
             margin-top: 8px;
         }
         
+        .btn-glean-troubleshoot {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            font-family: inherit;
+        }
+        
+        .btn-glean-troubleshoot:hover {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+        }
+        
+        .btn-glean-troubleshoot svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+        
         .capture-vars {
             display: flex;
             flex-wrap: wrap;
@@ -1064,6 +1098,78 @@ HTML_TEMPLATE = """
         let summary = { total: 0, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
         let selectedTestCases = new Set();
         let providerTestCards = {};  // {providerId: {number, expiration_month, expiration_year, security_code, holder_name}}
+        
+        // Glean configuration (injected from backend)
+        const GLEAN_DOMAIN = '{{ glean_domain }}';
+        const GLEAN_AGENT_ID = '{{ glean_agent_id }}';
+        
+        // Find the payment method name for a given test case ID from the hierarchy
+        function getPaymentMethodForTestCase(testCaseId) {
+            if (!currentHierarchy) return '';
+            for (const pm of currentHierarchy) {
+                for (const provider of pm.providers) {
+                    for (const tc of provider.test_cases) {
+                        if (tc.id === testCaseId) return pm.name;
+                    }
+                }
+            }
+            return '';
+        }
+        
+        // Find the provider name for a given test case ID and step from the hierarchy
+        function getProviderForTestCase(testCaseId) {
+            if (!currentHierarchy) return '';
+            for (const pm of currentHierarchy) {
+                for (const provider of pm.providers) {
+                    for (const tc of provider.test_cases) {
+                        if (tc.id === testCaseId) return provider.name;
+                    }
+                }
+            }
+            return '';
+        }
+        
+        // Open Glean troubleshoot chat in a new tab
+        function openGleanTroubleshoot(provider, paymentMethod, responseBody, paymentId, traceId) {
+            if (!GLEAN_DOMAIN) {
+                alert('Glean domain not configured. Please set GLEAN_DOMAIN in your .env file.');
+                return;
+            }
+            
+            const responseText = typeof responseBody === 'string' 
+                ? responseBody 
+                : JSON.stringify(responseBody, null, 2);
+            
+            let context = '';
+            if (paymentId) context += `\nPayment ID: ${paymentId}`;
+            if (traceId) context += `\nTrace ID: ${traceId}`;
+            
+            const initialMessage = `I am making a certification with the merchant and ${provider} ${paymentMethod} transactions fails with the following response:\n${responseText}${context}\nCan you please validate what can be missing and generate a recommendation for the merchant?\nPlease use Yuno internal documentation.`;
+            
+            const params = new URLSearchParams();
+            params.set('domain', GLEAN_DOMAIN);
+            params.set('mode', 'fullscreen');
+            params.set('initialMessage', initialMessage);
+            if (GLEAN_AGENT_ID) params.set('agentId', GLEAN_AGENT_ID);
+            
+            window.open('/glean-chat?' + params.toString(), '_blank');
+        }
+        
+        // Convenience: troubleshoot a specific failed step by test case ID and step ID
+        function troubleshootStep(testCaseId, stepId) {
+            const result = testResults[testCaseId];
+            const stepResult = result?.steps?.find(s => s.step_id === stepId);
+            if (!stepResult?.response_body) {
+                alert('No response data available for this step.');
+                return;
+            }
+            
+            const paymentMethod = getPaymentMethodForTestCase(testCaseId);
+            const provider = getProviderForTestCase(testCaseId);
+            const paymentId = stepResult.response_body?.payment?.id || stepResult.response_body?.id || '';
+            const traceId = stepResult.response_headers?.['x-trace-id'] || '';
+            openGleanTroubleshoot(provider, paymentMethod, stepResult.response_body, paymentId, traceId);
+        }
         
         // Inline Provider Card Input Functions
         function renderProviderCardInputs(providerId, paymentMethodId) {
@@ -1647,6 +1753,17 @@ HTML_TEMPLATE = """
                     ? `<div class="step-error-msg">${stepResult.error_message}</div>` 
                     : '';
                 
+                // Glean troubleshoot button for failed/declined steps
+                const stepResponseUpper = (stepResult?.response_status || '').toUpperCase();
+                const isDeclinedOrFailed = stepResult?.status === 'failure' 
+                    || ['DECLINED', 'REJECTED', 'FAILED'].includes(stepResponseUpper);
+                const gleanBtnHtml = (isDeclinedOrFailed && stepResult?.response_body && GLEAN_DOMAIN)
+                    ? `<button class="btn-glean-troubleshoot" onclick="event.stopPropagation(); troubleshootStep('${tc.id}', ${step.step_id})">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                        Troubleshoot on Glean
+                       </button>`
+                    : '';
+                
                 return `
                     <div class="step-detail ${stepStatusClass}">
                         <div class="step-detail-header">
@@ -1662,6 +1779,7 @@ HTML_TEMPLATE = """
                             ${quickInfoHtml}
                             ${responseHtml}
                             ${errorHtml}
+                            ${gleanBtnHtml}
                         </div>
                     </div>
                 `;
@@ -2307,6 +2425,22 @@ HTML_TEMPLATE = """
                                 `);
                             }
                         }
+                        
+                        // Add "Troubleshoot on Glean" button for failed/declined steps
+                        const respStatusUpper = (stepResult.response_status || '').toUpperCase();
+                        const isStepDeclinedOrFailed = stepResult.status === 'failure' 
+                            || ['DECLINED', 'REJECTED', 'FAILED'].includes(respStatusUpper);
+                        if (isStepDeclinedOrFailed && stepResult.response_body && GLEAN_DOMAIN) {
+                            const gleanBodyEl = stepEl.querySelector('.step-detail-body');
+                            if (gleanBodyEl && !gleanBodyEl.querySelector('.btn-glean-troubleshoot')) {
+                                gleanBodyEl.insertAdjacentHTML('beforeend', `
+                                    <button class="btn-glean-troubleshoot" onclick="event.stopPropagation(); troubleshootStep('${tc.test_case_id}', ${stepResult.step_id})">
+                                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                                        Troubleshoot on Glean
+                                    </button>
+                                `);
+                            }
+                        }
                 });
             }
         }
@@ -2353,8 +2487,20 @@ HTML_TEMPLATE = """
             postActions.classList.add('hidden');
             summaryDiv.classList.add('hidden');
             
+            // Save expanded state before re-rendering
+            const expandedIds = new Set();
+            document.querySelectorAll('.hierarchy-group.expanded, .test-case.expanded').forEach(el => {
+                expandedIds.add(el.id);
+            });
+            
             // Reset test case displays
             displayTestSuite(currentSuite);
+            
+            // Restore expanded state after re-rendering
+            expandedIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('expanded');
+            });
             
             // Check if we have a saved payload from the Builder
             const savedPayload = sessionStorage.getItem('payment_payload');
@@ -2561,7 +2707,126 @@ HTML_TEMPLATE = """
 @app.route('/')
 def index():
     """Serve the main page."""
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(
+        HTML_TEMPLATE,
+        glean_domain=os.getenv('GLEAN_DOMAIN', ''),
+        glean_agent_id=os.getenv('GLEAN_AGENT_ID', '')
+    )
+
+
+# =============================================================================
+# Glean Chat - Standalone troubleshooting page
+# =============================================================================
+
+GLEAN_CHAT_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MATRIX - Troubleshoot on Glean</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #fff;
+        }
+        #chat-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .chat-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            padding: 40px;
+            color: #656d76;
+        }
+        .chat-placeholder h3 { font-size: 18px; margin-bottom: 8px; color: #333; }
+        .chat-placeholder p { font-size: 13px; max-width: 400px; line-height: 1.6; }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div class="chat-placeholder" id="placeholder">
+            <div class="spinner"></div>
+            <h3>Connecting to Glean...</h3>
+            <p>Loading the AI assistant to help troubleshoot this payment.</p>
+        </div>
+    </div>
+
+    <script>
+        (function boot() {
+            const params = new URLSearchParams(window.location.search);
+            const domain = params.get('domain');
+
+            if (!domain) {
+                document.getElementById('placeholder').innerHTML =
+                    '<h3>Configuration Error</h3><p>No Glean domain configured. Set <strong>GLEAN_DOMAIN</strong> in your .env file and restart.</p>';
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = 'https://' + domain + '/embedded-search-latest.min.js';
+            script.defer = true;
+
+            script.onload = function() {
+                const container = document.getElementById('chat-container');
+                var placeholder = document.getElementById('placeholder');
+                if (placeholder) placeholder.remove();
+
+                var options = {};
+                var msg = params.get('initialMessage');
+                var agent = params.get('agentId');
+                var theme = params.get('themeVariant');
+
+                if (msg) options.initialMessage = msg;
+                if (agent) options.agentId = agent;
+                if (theme) options.themeVariant = theme;
+
+                try {
+                    var SDK = window.EmbeddedSearch || window.GleanWebSDK;
+                    SDK.renderChat(container, options);
+                } catch (e) {
+                    console.error('Glean Chat error:', e);
+                    container.innerHTML = '<div class="chat-placeholder"><h3>Chat Error</h3><p>' + e.message + '</p></div>';
+                }
+            };
+
+            script.onerror = function() {
+                document.getElementById('chat-container').innerHTML =
+                    '<div class="chat-placeholder"><h3>Connection Failed</h3><p>Could not load the Glean SDK from <strong>' + domain + '</strong>.</p></div>';
+            };
+
+            document.head.appendChild(script);
+        })();
+    </script>
+</body>
+</html>
+"""
+
+
+@app.route('/glean-chat')
+def glean_chat():
+    """Serve the standalone Glean chat page for payment troubleshooting."""
+    return render_template_string(GLEAN_CHAT_TEMPLATE)
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
