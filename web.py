@@ -30,6 +30,9 @@ uploaded_suites = {}
 # Store provider test cards per suite (suite_id -> {provider_id: ProviderTestCard})
 provider_test_cards_storage = {}
 
+# Temporary storage for E2E SDK sessions (e2e_session_id -> session data)
+e2e_sessions = {}
+
 def load_config(config_path: str = "config/config.json") -> Config:
     """Load configuration from file."""
     try:
@@ -211,6 +214,25 @@ HTML_TEMPLATE = """
             color: #888;
             font-size: 0.85rem;
             font-weight: normal;
+        }
+
+        .e2e-sdk-btn {
+            background: #7c3aed;
+            color: white;
+            border: none;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: 8px;
+            letter-spacing: 0.3px;
+            transition: background 0.2s;
+        }
+        .e2e-sdk-btn:hover { background: #6d28d9; }
+        .e2e-sdk-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         
         .hierarchy-children {
@@ -1612,6 +1634,7 @@ HTML_TEMPLATE = """
                                 <span class="hierarchy-number">${pmIndex}.${providerIndex}</span>
                                 <span class="hierarchy-name">${provider.name}</span>
                                 <span class="hierarchy-count">${provider.test_cases.length} tests</span>
+                                ${isCardProvider ? `<button class="e2e-sdk-btn" onclick="event.stopPropagation(); startE2ETest('${provider.id}', '${provider.test_cases[0]?.id || ''}')" title="Run E2E SDK Lite test for ${provider.name}">E2E SDK</button>` : ''}
                             </div>
                             ${isCardProvider ? renderProviderCardInputs(provider.id, pm.id).replace('class="provider-card-inputs"', `class="provider-card-inputs${showCardInputs ? ' visible' : ''}"`) : ''}
                             <div class="hierarchy-children">
@@ -2699,6 +2722,54 @@ HTML_TEMPLATE = """
             uploadError.classList.add('hidden');
             fileInput.value = '';
         });
+
+        async function startE2ETest(providerId, testCaseId) {
+            if (!currentSuiteId) {
+                alert('No test suite loaded');
+                return;
+            }
+            if (!testCaseId) {
+                alert('No test case found for this provider');
+                return;
+            }
+
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+
+            try {
+                const res = await fetch('/e2e/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        suite_id: currentSuiteId,
+                        test_case_id: testCaseId,
+                        provider: providerId
+                    })
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    let msg = data.error || 'Unknown error';
+                    if (data.details) {
+                        const detail = typeof data.details === 'string'
+                            ? data.details
+                            : JSON.stringify(data.details, null, 2);
+                        msg += '\\n\\nDetails:\\n' + detail;
+                    }
+                    alert('E2E start failed: ' + msg);
+                    return;
+                }
+
+                window.open('/e2e/checkout/' + data.e2e_session_id, '_blank');
+            } catch (err) {
+                alert('E2E start error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
     </script>
 </body>
 </html>
@@ -3386,6 +3457,165 @@ def datadog_status():
     client = get_datadog_client()
     return jsonify({
         'configured': client is not None
+    })
+
+
+@app.route('/e2e/start', methods=['POST'])
+def e2e_start():
+    """Initiate an E2E SDK Lite test flow.
+
+    Creates a checkout session from the test case's payment data,
+    stores the session for later payment processing, and returns
+    the data needed to render the SDK Lite page.
+    """
+    import copy as _copy
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    suite_id = data.get('suite_id')
+    test_case_id = data.get('test_case_id')
+    provider = data.get('provider')
+
+    if not suite_id or suite_id not in uploaded_suites:
+        return jsonify({'error': 'Test suite not found'}), 404
+
+    test_suite = uploaded_suites[suite_id]
+
+    # Find the test case
+    test_case = None
+    for tc in test_suite.test_cases:
+        if tc.id == test_case_id:
+            test_case = tc
+            break
+
+    if not test_case:
+        return jsonify({'error': f'Test case {test_case_id} not found'}), 404
+
+    # Get payment data from the first step
+    if not test_case.steps or not test_case.steps[0].input_data:
+        return jsonify({'error': 'Test case has no payment data in first step'}), 400
+
+    payment_data = _copy.deepcopy(test_case.steps[0].input_data)
+
+    # Create checkout session
+    config = load_config()
+    if suite_id in provider_test_cards_storage:
+        config.provider_test_cards = provider_test_cards_storage[suite_id]
+    api_client = APIClient(config)
+
+    # Auto-create a Yuno customer if customer_payer.id is missing
+    customer_payer = payment_data.get("customer_payer") or {}
+    if not customer_payer.get("id"):
+        if not customer_payer:
+            customer_payer = {"email": "matrix-e2e@y.uno", "first_name": "MATRIX", "last_name": "E2E Test"}
+            payment_data["customer_payer"] = customer_payer
+
+        customer_response = api_client.create_customer(customer_payer)
+        if not customer_response.is_success:
+            return jsonify({
+                'error': 'Failed to create customer for E2E checkout',
+                'details': customer_response.body
+            }), 400
+
+        customer_id = customer_response.body.get("id")
+        if not customer_id:
+            return jsonify({'error': 'No customer id returned from Yuno API'}), 500
+
+        payment_data["customer_payer"]["id"] = customer_id
+
+    checkout_response = api_client.create_checkout_session(payment_data)
+
+    if not checkout_response.is_success:
+        return jsonify({
+            'error': 'Failed to create checkout session',
+            'details': checkout_response.body
+        }), 400
+
+    checkout_session = checkout_response.body.get('checkout_session')
+    if not checkout_session:
+        return jsonify({'error': 'No checkout_session in API response'}), 500
+
+    # Store session data for later payment processing
+    e2e_session_id = str(uuid.uuid4())
+    e2e_sessions[e2e_session_id] = {
+        'payment_data': payment_data,
+        'checkout_session': checkout_session,
+        'provider': provider,
+        'suite_id': suite_id,
+        'test_case_id': test_case_id,
+        'created_at': datetime.utcnow().isoformat(),
+    }
+
+    return jsonify({
+        'e2e_session_id': e2e_session_id,
+        'checkout_session': checkout_session,
+        'country': payment_data.get('country', 'US'),
+        'public_api_key': api_client.yuno_public_key,
+    })
+
+
+@app.route('/e2e/checkout/<e2e_session_id>')
+def e2e_checkout(e2e_session_id):
+    """Serve the SDK Lite checkout page for an E2E session."""
+    session = e2e_sessions.get(e2e_session_id)
+    if not session:
+        return "E2E session not found or expired", 404
+
+    config = load_config()
+    api_client = APIClient(config)
+
+    return render_template_string(
+        E2E_CHECKOUT_TEMPLATE,
+        public_api_key=api_client.yuno_public_key,
+        checkout_session=session['checkout_session'],
+        country_code=session['payment_data'].get('country', 'US'),
+        e2e_session_id=e2e_session_id,
+        provider=session['provider'],
+        language='en',
+    )
+
+
+@app.route('/e2e/payment', methods=['POST'])
+def e2e_payment():
+    """Process an E2E SDK payment using the OTT from the SDK Lite callback."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    e2e_session_id = data.get('e2e_session_id')
+    one_time_token = data.get('one_time_token')
+
+    if not e2e_session_id or e2e_session_id not in e2e_sessions:
+        return jsonify({'error': 'E2E session not found or expired'}), 404
+
+    if not one_time_token:
+        return jsonify({'error': 'one_time_token is required'}), 400
+
+    session = e2e_sessions[e2e_session_id]
+
+    config = load_config()
+    suite_id = session.get('suite_id')
+    if suite_id and suite_id in provider_test_cards_storage:
+        config.provider_test_cards = provider_test_cards_storage[suite_id]
+    api_client = APIClient(config)
+
+    result = api_client.e2e_create_payment(
+        provider=session['provider'],
+        data=session['payment_data'],
+        one_time_token=one_time_token,
+        checkout_session=session['checkout_session'],
+    )
+
+    # Clean up the session
+    del e2e_sessions[e2e_session_id]
+
+    return jsonify({
+        'status_code': result.status_code,
+        'body': result.body,
+        'error': result.error,
+        'duration_ms': result.duration_ms,
+        'request_url': result.request_url,
     })
 
 
@@ -4604,6 +4834,290 @@ BUILDER_TEMPLATE = """
                 validation.textContent = 'Cannot save: Invalid JSON in preview';
             }
         }
+    </script>
+</body>
+</html>
+"""
+
+E2E_CHECKOUT_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MATRIX - E2E SDK Lite Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            min-height: 100vh;
+        }
+        .container { max-width: 720px; margin: 0 auto; padding: 40px 20px; }
+        header { text-align: center; margin-bottom: 32px; }
+        h1 { font-size: 2rem; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; }
+        .subtitle { color: #666; font-size: 0.95rem; }
+        .provider-badge {
+            display: inline-block;
+            background: #7c3aed;
+            color: white;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card h2 { font-size: 1rem; color: #1a1a2e; margin-bottom: 14px; font-weight: 600; }
+        .steps { display: flex; gap: 12px; margin-bottom: 8px; }
+        .step-item {
+            flex: 1;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #f0f0f5;
+            text-align: center;
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: #888;
+            transition: all 0.3s ease;
+        }
+        .step-item.active { background: #ede9fe; color: #7c3aed; font-weight: 600; }
+        .step-item.done { background: #d1fae5; color: #059669; }
+        .step-item.error { background: #fee2e2; color: #dc2626; }
+        .step-num {
+            display: inline-block;
+            width: 20px; height: 20px;
+            line-height: 20px;
+            border-radius: 50%;
+            background: #ccc;
+            color: white;
+            font-size: 0.7rem;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .step-item.active .step-num { background: #7c3aed; }
+        .step-item.done .step-num { background: #059669; }
+        .step-item.error .step-num { background: #dc2626; }
+        #sdk-container {
+            min-height: 240px;
+            border: 2px dashed #e0e0e0;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #aaa;
+            font-size: 0.9rem;
+            position: relative;
+        }
+        #sdk-container.loaded { border: none; }
+        #root { width: 100%; }
+        #result-panel { display: none; }
+        #result-panel.visible { display: block; }
+        .result-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .result-status {
+            padding: 5px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .result-status.success { background: #d1fae5; color: #059669; }
+        .result-status.failure { background: #fee2e2; color: #dc2626; }
+        .result-status.pending { background: #fef3c7; color: #d97706; }
+        .result-body {
+            background: #1e1e2e;
+            color: #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .spinner {
+            display: inline-block;
+            width: 18px; height: 18px;
+            border: 2px solid #ddd;
+            border-top: 2px solid #7c3aed;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error-msg { color: #dc2626; font-size: 0.85rem; margin-top: 8px; }
+        .back-link {
+            display: inline-block;
+            margin-top: 16px;
+            color: #7c3aed;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .back-link:hover { text-decoration: underline; }
+        .duration { color: #999; font-size: 0.8rem; margin-left: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>MATRIX</h1>
+            <p class="subtitle">E2E SDK Lite Test</p>
+            <span class="provider-badge">{{ provider }}</span>
+        </header>
+
+        <div class="card">
+            <h2>Flow Progress</h2>
+            <div class="steps">
+                <div class="step-item done" id="step-1">
+                    <span class="step-num">1</span> Checkout Session
+                </div>
+                <div class="step-item active" id="step-2">
+                    <span class="step-num">2</span> Card Input
+                </div>
+                <div class="step-item" id="step-3">
+                    <span class="step-num">3</span> Payment
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Enter Card Details</h2>
+            <div id="sdk-container">
+                <div id="root"></div>
+            </div>
+            <p class="error-msg" id="sdk-error" style="display:none;"></p>
+        </div>
+
+        <div class="card" id="result-panel">
+            <h2>Payment Result</h2>
+            <div class="result-header">
+                <span class="result-status" id="result-status"></span>
+                <span class="duration" id="result-duration"></span>
+            </div>
+            <div class="result-body" id="result-body"></div>
+        </div>
+
+        <a class="back-link" href="/">&larr; Back to MATRIX</a>
+    </div>
+
+    <script src="https://sdk-web.y.uno/v1/static/js/main.min.js"></script>
+    <script>
+        const E2E_SESSION_ID = '{{ e2e_session_id }}';
+        const CHECKOUT_SESSION = '{{ checkout_session }}';
+        const PUBLIC_API_KEY = '{{ public_api_key }}';
+        const COUNTRY_CODE = '{{ country_code }}';
+        const LANGUAGE = '{{ language }}';
+
+        function setStep(num, state) {
+            const el = document.getElementById('step-' + num);
+            el.className = 'step-item ' + state;
+        }
+
+        function displayResult(data) {
+            const panel = document.getElementById('result-panel');
+            const status = document.getElementById('result-status');
+            const body = document.getElementById('result-body');
+            const dur = document.getElementById('result-duration');
+
+            panel.classList.add('visible');
+
+            const paymentStatus = (data.body && data.body.status) || '';
+            const isSuccess = data.status_code >= 200 && data.status_code < 300;
+            const isPending = paymentStatus === 'PENDING';
+
+            if (isPending) {
+                status.textContent = paymentStatus;
+                status.className = 'result-status pending';
+            } else if (isSuccess) {
+                status.textContent = paymentStatus || 'SUCCESS';
+                status.className = 'result-status success';
+            } else {
+                status.textContent = data.error || 'FAILED';
+                status.className = 'result-status failure';
+            }
+
+            if (data.duration_ms) {
+                dur.textContent = data.duration_ms + 'ms';
+            }
+
+            body.textContent = JSON.stringify(data.body, null, 2);
+        }
+
+        function displayError(error) {
+            const errEl = document.getElementById('sdk-error');
+            errEl.style.display = 'block';
+            errEl.textContent = typeof error === 'string' ? error : JSON.stringify(error);
+            setStep(2, 'error');
+        }
+
+        (async function() {
+            try {
+                const yuno = await Yuno.initialize(PUBLIC_API_KEY);
+
+                yuno.startCheckout({
+                    checkoutSession: CHECKOUT_SESSION,
+                    elementSelector: '#root',
+                    countryCode: COUNTRY_CODE,
+                    language: LANGUAGE,
+                    showLoading: true,
+                    showPaymentStatus: false,
+                    renderMode: {
+                        type: 'element',
+                        elementSelector: '#root'
+                    },
+                    card: {
+                        type: 'step'
+                    },
+                    async yunoCreatePayment(oneTimeToken) {
+                        setStep(2, 'done');
+                        setStep(3, 'active');
+
+                        try {
+                            const response = await fetch('/e2e/payment', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    e2e_session_id: E2E_SESSION_ID,
+                                    one_time_token: oneTimeToken
+                                })
+                            });
+                            const result = await response.json();
+                            displayResult(result);
+
+                            const ok = result.status_code >= 200 && result.status_code < 300;
+                            setStep(3, ok ? 'done' : 'error');
+
+                            yuno.continuePayment({ showPaymentStatus: true });
+                        } catch (err) {
+                            setStep(3, 'error');
+                            displayError('Payment request failed: ' + err.message);
+                        }
+                    },
+                    yunoError(error) {
+                        displayError(error);
+                    }
+                });
+
+                yuno.mountCheckoutLite({ paymentMethodType: 'CARD' });
+                document.getElementById('sdk-container').classList.add('loaded');
+            } catch (err) {
+                displayError('SDK initialization failed: ' + err.message);
+            }
+        })();
     </script>
 </body>
 </html>

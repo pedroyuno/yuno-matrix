@@ -5,6 +5,7 @@ Handles HTTP requests to payment provider APIs.
 Supports both placeholder mode (for testing) and real Yuno Payment API.
 """
 
+import copy
 import os
 import uuid
 import requests
@@ -249,6 +250,142 @@ class APIClient:
         }
         
         return data
+
+    def create_customer(self, customer_data: Dict[str, Any]) -> APIResponse:
+        """
+        Create a Yuno customer from payer data.
+
+        Used by the E2E flow to auto-create a customer when
+        customer_payer.id is missing from the payment data.
+
+        Args:
+            customer_data: Dict with email, first_name, last_name, document,
+                           phone, billing_address, etc.
+
+        Returns:
+            APIResponse whose body contains the 'id' field (Yuno customer UUID)
+        """
+        merchant_customer_id = f"matrix_e2e_{uuid.uuid4().hex[:12]}"
+        email = customer_data.get("email", "matrix-e2e@y.uno")
+
+        if self.placeholder_mode:
+            return APIResponse(
+                status_code=200,
+                headers={"Content-Type": "application/json"},
+                body={
+                    "id": str(uuid.uuid4()),
+                    "merchant_customer_id": merchant_customer_id,
+                    "email": email,
+                    "first_name": customer_data.get("first_name"),
+                    "last_name": customer_data.get("last_name"),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                },
+                duration_ms=60,
+                request_url=f"{self.yuno_base_url}/customers"
+            )
+
+        payload: Dict[str, Any] = {
+            "merchant_customer_id": merchant_customer_id,
+            "email": email,
+        }
+
+        for field in ("first_name", "last_name", "country", "gender",
+                       "date_of_birth", "nationality", "document",
+                       "phone", "billing_address", "shipping_address"):
+            if field in customer_data and customer_data[field]:
+                payload[field] = customer_data[field]
+
+        return self._make_yuno_request("/customers", "POST", payload)
+
+    def create_checkout_session(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Create a Yuno checkout session from payment data.
+
+        Extracts customer_id, country, amount, and description from a standard
+        payment JSON and calls POST /checkout/sessions.
+
+        Args:
+            data: Payment data containing customer_payer.id, country, amount, description
+
+        Returns:
+            APIResponse whose body contains the 'checkout_session' field
+        """
+        customer_id = (data.get("customer_payer") or {}).get("id")
+
+        if not customer_id:
+            return APIResponse(
+                status_code=400,
+                headers={},
+                body={"error": "customer_payer.id is required for E2E SDK checkout sessions"},
+                error="customer_payer.id is required for E2E SDK checkout sessions",
+                request_url=f"{self.yuno_base_url}/checkout/sessions"
+            )
+
+        if self.placeholder_mode:
+            session_id = str(uuid.uuid4())
+            return APIResponse(
+                status_code=200,
+                headers={"Content-Type": "application/json"},
+                body={
+                    "checkout_session": session_id,
+                    "merchant_order_id": str(uuid.uuid4()),
+                    "country": data.get("country", "US"),
+                    "payment_description": data.get("description", "MATRIX E2E SDK Test"),
+                    "customer_id": customer_id,
+                    "amount": data.get("amount", {"currency": "USD", "value": 0}),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "workflow": "SDK_CHECKOUT",
+                },
+                duration_ms=80,
+                request_url=f"{self.yuno_base_url}/checkout/sessions"
+            )
+
+        checkout_data = {
+            "customer_id": customer_id,
+            "merchant_order_id": str(uuid.uuid4()),
+            "payment_description": data.get("description", "MATRIX E2E SDK Test"),
+            "country": data.get("country", "US"),
+            "amount": data.get("amount", {"currency": "USD", "value": 0}),
+        }
+
+        if self.yuno_account_id:
+            checkout_data["account_id"] = self.yuno_account_id
+
+        return self._make_yuno_request("/checkout/sessions", "POST", checkout_data)
+
+    def e2e_create_payment(
+        self,
+        provider: str,
+        data: Dict[str, Any],
+        one_time_token: str,
+        checkout_session: str
+    ) -> APIResponse:
+        """
+        Create a payment using an OTT from the SDK Lite E2E flow.
+
+        Transforms a standard DIRECT payment JSON into an SDK_CHECKOUT payment
+        by replacing card_data with the one-time token.
+
+        Args:
+            provider: Provider identifier
+            data: Original payment data (DIRECT workflow with card_data)
+            one_time_token: OTT generated by the Yuno SDK Lite
+            checkout_session: Checkout session ID
+
+        Returns:
+            APIResponse from the payment creation
+        """
+        payment_data = copy.deepcopy(data)
+
+        payment_data["workflow"] = "SDK_CHECKOUT"
+        payment_data["checkout"] = {"session": checkout_session}
+
+        payment_data["payment_method"] = {
+            "type": "CARD",
+            "token": one_time_token,
+        }
+
+        return self.payment(provider, payment_data)
 
     def payment(self, provider: str, data: Dict[str, Any]) -> APIResponse:
         """

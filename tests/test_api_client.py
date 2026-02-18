@@ -158,3 +158,216 @@ def test_all_operations_return_response(mock_config):
         response = client.execute_operation(op, "provider_a", data)
         assert response.status_code == 200
         assert isinstance(response.body, dict)
+
+
+# ============================================================================
+# E2E SDK Lite Tests
+# ============================================================================
+
+@pytest.mark.unit
+def test_create_checkout_session_success(mock_config):
+    """Test checkout session creation in placeholder mode."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    data = {
+        "description": "Test Payment",
+        "country": "BR",
+        "amount": {"currency": "BRL", "value": 100},
+        "customer_payer": {"id": "cust-uuid-1234-5678-abcdefabcdef"}
+    }
+    response = client.create_checkout_session(data)
+    assert response.status_code == 200
+    assert "checkout_session" in response.body
+    assert response.body["country"] == "BR"
+    assert response.body["customer_id"] == "cust-uuid-1234-5678-abcdefabcdef"
+    assert response.body["amount"]["currency"] == "BRL"
+
+
+@pytest.mark.unit
+def test_create_checkout_session_missing_customer_id(mock_config):
+    """Test checkout session fails when customer_payer.id is missing."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    data = {
+        "description": "Test Payment",
+        "country": "BR",
+        "amount": {"currency": "BRL", "value": 100},
+    }
+    response = client.create_checkout_session(data)
+    assert response.status_code == 400
+    assert response.error is not None
+    assert "customer_payer.id" in response.error
+
+
+@pytest.mark.unit
+def test_create_checkout_session_empty_customer_payer(mock_config):
+    """Test checkout session fails when customer_payer exists but has no id."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    data = {
+        "description": "Test Payment",
+        "country": "BR",
+        "amount": {"currency": "BRL", "value": 100},
+        "customer_payer": {"email": "test@y.uno"}
+    }
+    response = client.create_checkout_session(data)
+    assert response.status_code == 400
+    assert "customer_payer.id" in response.error
+
+
+@pytest.mark.unit
+def test_e2e_create_payment_transforms_data(mock_config):
+    """Test that e2e_create_payment correctly transforms payment JSON."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    data = {
+        "description": "SafraPay Test",
+        "country": "BR",
+        "amount": {"currency": "BRL", "value": 100},
+        "workflow": "DIRECT",
+        "customer_payer": {"id": "cust-uuid", "email": "test@y.uno"},
+        "payment_method": {
+            "type": "CARD",
+            "detail": {
+                "card": {
+                    "capture": True,
+                    "card_data": {
+                        "number": "4507990000000002",
+                        "expiration_month": 12,
+                        "expiration_year": 2030,
+                        "security_code": "123",
+                        "holder_name": "John Doe"
+                    }
+                }
+            }
+        },
+        "metadata": [{"key": "provider", "value": "safrapay"}]
+    }
+
+    response = client.e2e_create_payment(
+        provider="safrapay",
+        data=data,
+        one_time_token="ott-test-token-12345",
+        checkout_session="cs-test-session-id"
+    )
+
+    assert response.status_code == 200
+    # Original data must NOT be mutated
+    assert data["workflow"] == "DIRECT"
+    assert "card_data" in data["payment_method"]["detail"]["card"]
+
+
+@pytest.mark.unit
+def test_e2e_create_payment_preserves_metadata(mock_config):
+    """Test that e2e_create_payment preserves and updates provider metadata."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    data = {
+        "description": "Test",
+        "country": "CO",
+        "amount": {"currency": "COP", "value": 50000},
+        "workflow": "DIRECT",
+        "customer_payer": {"id": "cust-uuid"},
+        "payment_method": {
+            "type": "CARD",
+            "detail": {"card": {"card_data": {"number": "4111111111111111"}}}
+        },
+        "metadata": [{"key": "provider", "value": "original_provider"}]
+    }
+
+    response = client.e2e_create_payment(
+        provider="paymentes",
+        data=data,
+        one_time_token="ott-12345",
+        checkout_session="cs-12345"
+    )
+
+    assert response.status_code == 200
+    # Original metadata should be preserved
+    assert data["metadata"][0]["value"] == "original_provider"
+
+
+@pytest.mark.unit
+def test_e2e_create_payment_placeholder_mode(mock_config):
+    """Test e2e_create_payment returns mock response in placeholder mode."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    assert client.placeholder_mode is True
+
+    data = {
+        "description": "Placeholder Test",
+        "country": "US",
+        "amount": {"currency": "USD", "value": 10},
+        "workflow": "DIRECT",
+        "customer_payer": {"id": "cust-uuid"},
+        "payment_method": {
+            "type": "CARD",
+            "detail": {"card": {"card_data": {"number": "4111111111111111"}}}
+        }
+    }
+
+    response = client.e2e_create_payment(
+        provider="test_provider",
+        data=data,
+        one_time_token="ott-placeholder",
+        checkout_session="cs-placeholder"
+    )
+
+    assert response.status_code == 200
+    assert response.body.get("id") is not None
+    assert response.body.get("provider") == "test_provider"
+
+
+# ============================================================================
+# Customer Creation Tests
+# ============================================================================
+
+@pytest.mark.unit
+def test_create_customer_placeholder_mode(mock_config):
+    """Test customer creation returns mock response in placeholder mode."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    customer_data = {
+        "email": "test@y.uno",
+        "first_name": "Test",
+        "last_name": "User",
+        "document": {"document_type": "CPF", "document_number": "12345678900"}
+    }
+    response = client.create_customer(customer_data)
+    assert response.status_code == 200
+    assert response.body.get("id") is not None
+    assert response.body["email"] == "test@y.uno"
+    assert response.body["merchant_customer_id"].startswith("matrix_e2e_")
+
+
+@pytest.mark.unit
+def test_create_customer_uses_default_email(mock_config):
+    """Test customer creation uses default email when none is provided."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    response = client.create_customer({})
+    assert response.status_code == 200
+    assert response.body["email"] == "matrix-e2e@y.uno"
+
+
+@pytest.mark.unit
+def test_create_customer_then_checkout_session(mock_config):
+    """Test the full E2E flow: create customer, then checkout session."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+
+    # Payment data without customer_payer.id
+    customer_data = {"email": "test@y.uno", "first_name": "Test"}
+    customer_response = client.create_customer(customer_data)
+    assert customer_response.is_success
+    customer_id = customer_response.body["id"]
+
+    payment_data = {
+        "description": "E2E Test",
+        "country": "BR",
+        "amount": {"currency": "BRL", "value": 100},
+        "customer_payer": {"id": customer_id, "email": "test@y.uno"}
+    }
+    checkout_response = client.create_checkout_session(payment_data)
+    assert checkout_response.is_success
+    assert checkout_response.body.get("checkout_session") is not None

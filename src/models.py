@@ -48,7 +48,7 @@ class Step(BaseModel):
     @classmethod
     def validate_operation(cls, v: str) -> str:
         """Validate that operation is a known type."""
-        valid_operations = {'authorize', 'capture', 'purchase', 'refund', 'void', 'verify', 'tokenize'}
+        valid_operations = {'authorize', 'capture', 'purchase', 'refund', 'void', 'verify', 'tokenize', 'e2e_payment'}
         if v.lower() not in valid_operations:
             # Allow custom operations but warn about unknown types
             pass
