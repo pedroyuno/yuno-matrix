@@ -110,6 +110,37 @@ def test_refund_operation(mock_config):
 
 
 @pytest.mark.unit
+def test_partial_refund_operation(mock_config):
+    """Test partial refund returns PARTIALLY_REFUNDED sub_status."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    response = client.refund("provider_a", {
+        "payment_id": "pay_123",
+        "transaction_id": "txn_123",
+        "amount": {"currency": "BRL", "value": 25}
+    })
+    assert response.status_code == 200
+    assert response.body["status"] == "SUCCEEDED"
+    assert response.body["sub_status"] == "PARTIALLY_REFUNDED"
+    assert response.body["amount"]["refunded"] == 25
+    assert response.body["transactions"]["type"] == "REFUND"
+
+
+@pytest.mark.unit
+def test_execute_operation_partial_refund_dispatch(mock_config):
+    """Test that execute_operation('partial_refund') dispatches to refund."""
+    config = Config(**mock_config)
+    client = APIClient(config)
+    response = client.execute_operation("partial_refund", "provider_a", {
+        "payment_id": "pay_123",
+        "transaction_id": "txn_123",
+        "amount": {"currency": "BRL", "value": 30}
+    })
+    assert response.status_code == 200
+    assert response.body["sub_status"] == "PARTIALLY_REFUNDED"
+
+
+@pytest.mark.unit
 def test_cancel_operation(mock_config):
     """Test cancel operation."""
     config = Config(**mock_config)

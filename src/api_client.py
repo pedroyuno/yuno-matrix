@@ -93,6 +93,7 @@ class APIClient:
             'capture': self.capture,
             'purchase': self.purchase,
             'refund': self.refund,
+            'partial_refund': self.refund,
             'cancel': self.cancel,
             'void': self.void,  # Alias for cancel
             'verify': self.verify,

@@ -361,3 +361,109 @@ def test_generate_single_operation_test(card_integration):
     # Unsupported operation
     tc = generator.generate_single_operation_test(card_integration, "purchase")
     assert tc is None
+
+
+# ============================================================================
+# Partial Refund Tests
+# ============================================================================
+
+@pytest.fixture
+def card_integration_with_partial_refund():
+    """Create a card integration that supports partial refunds."""
+    integration = ProviderIntegration(
+        integration_id="TEST_CARD",
+        provider="TEST_PROVIDER",
+        payment_method="CARD",
+        country="BR"
+    )
+    integration.operations = {
+        "authorize": OperationSupport(supported=True, status="Implemented"),
+        "capture": OperationSupport(supported=True, status="Implemented"),
+        "refund": OperationSupport(supported=True, status="Implemented"),
+        "partial_refund": OperationSupport(supported=True, status="Implemented"),
+        "cancel": OperationSupport(supported=True, status="Implemented"),
+        "purchase": OperationSupport(supported=False, status="Not Applicable"),
+    }
+    return integration
+
+
+@pytest.fixture
+def pix_integration_with_partial_refund():
+    """Create a PIX integration that supports partial refunds."""
+    integration = ProviderIntegration(
+        integration_id="TEST_PIX",
+        provider="TEST_PROVIDER",
+        payment_method="PIX",
+        country="BR"
+    )
+    integration.operations = {
+        "purchase": OperationSupport(supported=True, status="Implemented"),
+        "refund": OperationSupport(supported=True, status="Implemented"),
+        "partial_refund": OperationSupport(supported=True, status="Implemented"),
+        "authorize": OperationSupport(supported=False, status="Not Applicable"),
+        "capture": OperationSupport(supported=False, status="Not Applicable"),
+    }
+    return integration
+
+
+@pytest.mark.unit
+def test_generate_partial_refund_card_flow(card_integration_with_partial_refund):
+    """Test generating authorize_capture_partial_refund flow for card integration."""
+    generator = TestCaseGenerator()
+    test_cases = generator.generate_integration_tests(card_integration_with_partial_refund)
+
+    partial_refund_tc = next(
+        (tc for tc in test_cases if "authorize_capture_partial_refund" in tc.id), None
+    )
+    assert partial_refund_tc is not None
+    assert len(partial_refund_tc.steps) == 3
+    assert partial_refund_tc.steps[0].operation == "authorize"
+    assert partial_refund_tc.steps[1].operation == "capture"
+    assert partial_refund_tc.steps[2].operation == "partial_refund"
+
+    partial_step = partial_refund_tc.steps[2]
+    assert "amount" in partial_step.input_data
+    assert partial_step.input_data["amount"]["value"] == 50.0
+
+
+@pytest.mark.unit
+def test_generate_partial_refund_pix_flow(pix_integration_with_partial_refund):
+    """Test generating purchase_partial_refund flow for PIX integration."""
+    generator = TestCaseGenerator()
+    test_cases = generator.generate_integration_tests(pix_integration_with_partial_refund)
+
+    partial_refund_tc = next(
+        (tc for tc in test_cases if "purchase_partial_refund" in tc.id), None
+    )
+    assert partial_refund_tc is not None
+    assert len(partial_refund_tc.steps) == 2
+    assert partial_refund_tc.steps[0].operation == "purchase"
+    assert partial_refund_tc.steps[1].operation == "partial_refund"
+
+    partial_step = partial_refund_tc.steps[1]
+    assert "amount" in partial_step.input_data
+    assert partial_step.input_data["amount"]["value"] == 50.0
+
+
+@pytest.mark.unit
+def test_disable_partial_refund(card_integration_with_partial_refund):
+    """Test that include_partial_refund=False suppresses partial refund flows."""
+    config = GeneratorConfig(include_partial_refund=False)
+    generator = TestCaseGenerator(config)
+    test_cases = generator.generate_integration_tests(card_integration_with_partial_refund)
+
+    for tc in test_cases:
+        for step in tc.steps:
+            assert step.operation != "partial_refund"
+
+
+@pytest.mark.unit
+def test_partial_refund_not_generated_when_unsupported(card_integration):
+    """Test that partial refund flow is NOT generated when partial_refund is unsupported."""
+    generator = TestCaseGenerator()
+    test_cases = generator.generate_integration_tests(card_integration)
+
+    for tc in test_cases:
+        assert "partial_refund" not in tc.id
+        for step in tc.steps:
+            assert step.operation != "partial_refund"

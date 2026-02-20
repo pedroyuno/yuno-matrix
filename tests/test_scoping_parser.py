@@ -257,6 +257,25 @@ def test_parse_boolean():
 
 
 @pytest.mark.unit
+def test_parse_partial_refund_support():
+    """Test parsing partial_refund operation from scoping document."""
+    test_file = Path("tests/fixtures/sample_scoping.csv")
+    scoping_doc = ScopingParser.load_from_file(test_file)
+
+    rede = scoping_doc.get_integration("REDE_CARD")
+    assert rede.supports_operation("partial_refund")
+    assert rede.is_implemented("partial_refund")
+
+    pagbank = scoping_doc.get_integration("PAGBANK_PIX")
+    assert pagbank.supports_operation("partial_refund")
+    assert pagbank.is_implemented("partial_refund")
+
+    safrapay = scoping_doc.get_integration("SAFRAPAY_CARD")
+    assert safrapay.supports_operation("partial_refund")
+    assert safrapay.is_implemented("partial_refund")
+
+
+@pytest.mark.unit
 def test_extract_country():
     """Test country extraction from values."""
     assert ScopingParser._extract_country("Brazil") == "BR"

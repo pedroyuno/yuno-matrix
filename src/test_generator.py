@@ -57,6 +57,7 @@ class GeneratorConfig:
     include_refund: bool = True
     include_cancel: bool = True
     include_verify: bool = True
+    include_partial_refund: bool = True
 
 
 @dataclass
@@ -132,6 +133,8 @@ class TestCaseGenerator:
         'purchase': ['purchase'],
         'purchase_refund': ['purchase', 'refund'],
         'authorize_capture_refund': ['authorize', 'capture', 'refund'],
+        'purchase_partial_refund': ['purchase', 'partial_refund'],
+        'authorize_capture_partial_refund': ['authorize', 'capture', 'partial_refund'],
     }
     
     def __init__(self, config: Optional[GeneratorConfig] = None):
@@ -281,6 +284,16 @@ class TestCaseGenerator:
             if 'refund' in supported_ops and self.config.include_refund:
                 flows['purchase_refund'] = ['purchase', 'refund']
         
+        # Partial refund flows
+        if 'partial_refund' in supported_ops and self.config.include_partial_refund:
+            if integration.payment_method.upper() == 'CARD':
+                if 'authorize' in supported_ops and 'capture' in supported_ops:
+                    if self.config.include_authorize and self.config.include_capture:
+                        flows['authorize_capture_partial_refund'] = ['authorize', 'capture', 'partial_refund']
+            
+            if 'purchase' in supported_ops and self.config.include_purchase:
+                flows['purchase_partial_refund'] = ['purchase', 'partial_refund']
+        
         # Verify flow (for card verification)
         if 'verify' in supported_ops and self.config.include_verify:
             flows['verify'] = ['verify']
@@ -350,7 +363,7 @@ class TestCaseGenerator:
         }
         
         # Operations that reference previous step results
-        if operation in ('capture', 'refund', 'cancel'):
+        if operation in ('capture', 'refund', 'partial_refund', 'cancel'):
             var_prefix = integration.integration_id.lower().replace('_', '')
             
             # Base data for post-authorization operations
@@ -368,11 +381,17 @@ class TestCaseGenerator:
                     "value": f"${{{var_prefix}_amount_value}}"
                 }
             elif operation == 'refund':
-                # Refund requires: merchant_reference, reason, amount (optional for full refund)
                 post_auth_input["reason"] = "REQUESTED_BY_CUSTOMER"
                 post_auth_input["amount"] = {
                     "currency": f"${{{var_prefix}_amount_currency}}",
                     "value": f"${{{var_prefix}_amount_value}}"
+                }
+            elif operation == 'partial_refund':
+                partial_amount = round(amount * 0.5, 2)
+                post_auth_input["reason"] = "REQUESTED_BY_CUSTOMER"
+                post_auth_input["amount"] = {
+                    "currency": f"${{{var_prefix}_amount_currency}}",
+                    "value": partial_amount
                 }
             elif operation == 'cancel':
                 # Cancel requires: merchant_reference, reason
