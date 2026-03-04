@@ -30,8 +30,27 @@ uploaded_suites = {}
 # Store provider test cards per suite (suite_id -> {provider_id: ProviderTestCard})
 provider_test_cards_storage = {}
 
+# Store hierarchy per suite_id for Pré-Check Report generation
+suite_hierarchies: dict = {}
+
+# Store generated pre-check reports in memory (run_id -> report dict)
+precheck_reports: dict = {}
+
 # Temporary storage for E2E SDK sessions (e2e_session_id -> session data)
 e2e_sessions = {}
+
+# Runtime Yuno API credential overrides (take precedence over .env vars)
+runtime_credentials: dict = {}
+
+
+def get_active_credentials() -> dict:
+    """Return effective Yuno credentials, preferring runtime overrides over env vars."""
+    return {
+        "public_key":  runtime_credentials.get("public_key")  or os.getenv("YUNO_PUBLIC_API_KEY", ""),
+        "private_key": runtime_credentials.get("private_key") or os.getenv("YUNO_PRIVATE_SECRET_KEY", ""),
+        "account_id":  runtime_credentials.get("account_id")  or os.getenv("YUNO_ACCOUNT_ID", ""),
+        "environment": runtime_credentials.get("environment") or os.getenv("YUNO_ENVIRONMENT", "sandbox"),
+    }
 
 def load_config(config_path: str = "config/config.json") -> Config:
     """Load configuration from file."""
@@ -992,6 +1011,194 @@ HTML_TEMPLATE = """
                 grid-column: 1 / -1;
             }
         }
+
+        /* Credentials bar */
+        .creds-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: white;
+            border-radius: 8px;
+            padding: 10px 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+            font-size: 0.85rem;
+        }
+        .creds-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .creds-dot.green  { background: #22c55e; }
+        .creds-dot.yellow { background: #f59e0b; }
+        .creds-dot.red    { background: #ef4444; }
+        .creds-bar-label { color: #555; flex: 1; }
+        .creds-bar-env {
+            font-weight: 600;
+            color: #1a1a2e;
+            text-transform: uppercase;
+            font-size: 0.78rem;
+            letter-spacing: 0.05em;
+        }
+        .creds-bar-key { color: #888; font-family: monospace; font-size: 0.8rem; }
+
+        /* Credentials modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box {
+            background: white;
+            border-radius: 12px;
+            padding: 28px;
+            width: 460px;
+            max-width: 95vw;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+        }
+        .modal-box h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 20px;
+        }
+        .creds-field {
+            margin-bottom: 14px;
+        }
+        .creds-field label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 5px;
+        }
+        .creds-field input, .creds-field select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d0d5dd;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-family: monospace;
+            color: #1a1a2e;
+            background: #fafafa;
+        }
+        .creds-field input:focus, .creds-field select:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 2px rgba(79,70,229,0.1);
+        }
+        .creds-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .creds-msg {
+            font-size: 0.82rem;
+            margin-top: 10px;
+            min-height: 18px;
+        }
+        .creds-msg.success { color: #059669; }
+        .creds-msg.error   { color: #ef4444; }
+
+        /* ── Pré-Check Report Modal ───────────────────────────────────────── */
+        .report-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.55);
+            z-index: 2000;
+            overflow-y: auto;
+            padding: 40px 16px;
+            box-sizing: border-box;
+        }
+        .report-modal-overlay.active { display: block; }
+        .report-modal {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 980px;
+            width: 100%;
+            margin: 0 auto;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+            position: relative;
+            box-sizing: border-box;
+        }
+        .report-modal-close {
+            position: absolute; top: 16px; right: 20px;
+            background: none; border: none; font-size: 1.5rem;
+            cursor: pointer; color: #888; line-height: 1;
+        }
+        .report-modal-close:hover { color: #222; }
+        .report-header { margin-bottom: 20px; }
+        .report-header h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a2e; margin: 0 0 12px; }
+        .report-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 6px 24px;
+            font-size: 0.88rem;
+            margin-bottom: 20px;
+        }
+        .report-meta div { color: #555; }
+        .report-meta strong { color: #222; }
+        .report-summary-table {
+            width: 100%; border-collapse: collapse;
+            margin-bottom: 24px; font-size: 0.9rem;
+        }
+        .report-summary-table th,
+        .report-summary-table td { padding: 8px 14px; border: 1px solid #e5e7eb; text-align: left; }
+        .report-summary-table th { background: #f9fafb; font-weight: 600; }
+        .report-section { margin-bottom: 28px; }
+        .report-section h2 {
+            font-size: 1rem; font-weight: 700; color: #1a1a2e;
+            margin: 0 0 10px; padding-bottom: 6px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        .report-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .report-table th {
+            background: #f3f4f6; padding: 7px 10px;
+            text-align: left; font-weight: 600;
+            border: 1px solid #e5e7eb;
+        }
+        .report-table td { padding: 6px 10px; border: 1px solid #e5e7eb; vertical-align: top; }
+        .report-table tr:hover td { background: #fafafa; }
+        .status-badge {
+            display: inline-block; padding: 2px 8px;
+            border-radius: 10px; font-size: 0.75rem; font-weight: 600;
+        }
+        .status-badge.PASSED  { background: #d1fae5; color: #065f46; }
+        .status-badge.FAILED  { background: #fee2e2; color: #991b1b; }
+        .status-badge.ERROR   { background: #fef3c7; color: #92400e; }
+        .status-badge.SKIPPED { background: #f3f4f6; color: #6b7280; }
+        .sev-badge {
+            display: inline-block; padding: 1px 6px;
+            border-radius: 4px; font-size: 0.72rem; font-weight: 700;
+        }
+        .sev-badge.P0 { background: #fef2f2; color: #dc2626; }
+        .sev-badge.P1 { background: #eff6ff; color: #1d4ed8; }
+        .sev-badge.P2 { background: #f0fdf4; color: #16a34a; }
+        .report-actions-bar {
+            display: flex; gap: 12px; flex-wrap: wrap;
+            margin-top: 24px; padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .load-report-card {
+            background: white; border: 1px solid #e5e7eb;
+            border-radius: 8px; padding: 16px 20px; margin-top: 16px;
+        }
+        .load-report-card h3 { font-size: 0.95rem; font-weight: 600; margin: 0 0 10px; color: #374151; }
+        .load-report-area {
+            border: 2px dashed #d0d5dd; border-radius: 8px;
+            padding: 18px; text-align: center; cursor: pointer;
+            color: #6b7280; font-size: 0.88rem; transition: border-color 0.15s;
+        }
+        .load-report-area:hover { border-color: #6366f1; color: #4f46e5; }
     </style>
 </head>
 <body>
@@ -1000,7 +1207,48 @@ HTML_TEMPLATE = """
             <h1>MATRIX</h1>
             <p class="subtitle">Merchant API Test & Regression Integration eXerciser</p>
         </header>
-        
+
+        <!-- Credentials Status Bar -->
+        <div class="creds-bar" id="creds-bar">
+            <span class="creds-dot" id="creds-dot"></span>
+            <span class="creds-bar-label" id="creds-label">Loading credentials...</span>
+            <span class="creds-bar-env" id="creds-env"></span>
+            <span class="creds-bar-key" id="creds-key-preview"></span>
+            <button class="btn btn-secondary" style="padding: 4px 14px; font-size: 0.82rem;" onclick="openCredsModal()">Configure</button>
+        </div>
+
+        <!-- Credentials Modal -->
+        <div class="modal-overlay" id="creds-modal">
+            <div class="modal-box">
+                <h3>Yuno API Credentials</h3>
+                <div class="creds-field">
+                    <label>Public API Key</label>
+                    <input type="text" id="creds-public-key" placeholder="sandbox_gAAA..." autocomplete="off">
+                </div>
+                <div class="creds-field">
+                    <label>Private Secret Key</label>
+                    <input type="password" id="creds-private-key" placeholder="gAAAA..." autocomplete="off">
+                </div>
+                <div class="creds-field">
+                    <label>Account ID</label>
+                    <input type="text" id="creds-account-id" placeholder="a47da978-b69f-..." autocomplete="off">
+                </div>
+                <div class="creds-field">
+                    <label>Environment</label>
+                    <select id="creds-environment">
+                        <option value="sandbox">Sandbox</option>
+                        <option value="production">Production</option>
+                    </select>
+                </div>
+                <div class="creds-msg" id="creds-msg"></div>
+                <div class="creds-actions">
+                    <button class="btn btn-primary" onclick="saveCredentials()">Save & Apply</button>
+                    <button class="btn btn-secondary" onclick="resetCredentials()">Reset to .env</button>
+                    <button class="btn btn-secondary" style="margin-left: auto;" onclick="closeCredsModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Upload Section -->
         <div class="card" id="upload-section">
             <h2>Create or Load Test Case</h2>
@@ -1092,8 +1340,32 @@ HTML_TEMPLATE = """
             </div>
             <div class="actions hidden" id="post-actions">
                 <button class="btn btn-primary" id="download-btn">Download Logs</button>
+                <button class="btn btn-primary" id="report-btn" style="background:#059669;border-color:#059669;">Pre-Check Report</button>
                 <button class="btn btn-secondary" id="run-again-btn">Run Again</button>
                 <button class="btn btn-secondary" id="new-test-btn">New Test</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Saved Report card (visible in upload section) -->
+    <div class="container" id="load-report-container" style="margin-top:0;padding-top:0;">
+        <div class="load-report-card">
+            <h3>Load Saved Report</h3>
+            <div class="load-report-area" onclick="document.getElementById('load-report-input').click()">
+                <input type="file" id="load-report-input" accept=".json" style="display:none">
+                Click to load a previously saved <strong>Pre-Check Report JSON</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pre-Check Report Modal -->
+    <div class="report-modal-overlay" id="report-modal-overlay">
+        <div class="report-modal">
+            <button class="report-modal-close" onclick="closeReportModal()" title="Close">&times;</button>
+            <div id="report-modal-content"><!-- filled by JS --></div>
+            <div class="report-actions-bar">
+                <button class="btn btn-primary" id="report-download-btn">&#8203;Download Report JSON</button>
+                <button class="btn btn-secondary" onclick="closeReportModal()">Close</button>
             </div>
         </div>
     </div>
@@ -2500,6 +2772,9 @@ HTML_TEMPLATE = """
             
             uploadError.classList.add('hidden');
             
+            // Capture selected IDs for report generation
+            executionSelectedIds = [...selectedIds];
+
             // Reset state
             testResults = {};
             summary = { total: selectedIds.length, passed: 0, failed: 0, errors: 0, approved: 0, declined: 0 };
@@ -2770,6 +3045,255 @@ HTML_TEMPLATE = """
                 btn.textContent = originalText;
             }
         }
+
+        // ── Credentials bar & modal ──────────────────────────────────────────
+
+        async function loadCredentialsStatus() {
+            try {
+                const res = await fetch('/api/credentials');
+                const data = await res.json();
+                const dot = document.getElementById('creds-dot');
+                const label = document.getElementById('creds-label');
+                const envEl = document.getElementById('creds-env');
+                const keyEl = document.getElementById('creds-key-preview');
+
+                envEl.textContent = data.environment || '';
+                keyEl.textContent = data.public_key_preview ? data.public_key_preview : '';
+
+                if (data.configured && data.source === 'runtime') {
+                    dot.className = 'creds-dot green';
+                    label.textContent = 'Credentials configured (runtime)';
+                } else if (data.configured) {
+                    dot.className = 'creds-dot yellow';
+                    label.textContent = 'Using .env credentials';
+                } else {
+                    dot.className = 'creds-dot red';
+                    label.textContent = 'No credentials configured';
+                }
+            } catch (e) {
+                document.getElementById('creds-label').textContent = 'Could not load credential status';
+            }
+        }
+
+        function openCredsModal() {
+            document.getElementById('creds-modal').classList.add('open');
+            document.getElementById('creds-msg').textContent = '';
+        }
+
+        function closeCredsModal() {
+            document.getElementById('creds-modal').classList.remove('open');
+        }
+
+        document.getElementById('creds-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeCredsModal();
+        });
+
+        async function saveCredentials() {
+            const msg = document.getElementById('creds-msg');
+            msg.textContent = '';
+            const body = {
+                public_key:  document.getElementById('creds-public-key').value.trim(),
+                private_key: document.getElementById('creds-private-key').value.trim(),
+                account_id:  document.getElementById('creds-account-id').value.trim(),
+                environment: document.getElementById('creds-environment').value,
+            };
+            try {
+                const res = await fetch('/api/credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    msg.className = 'creds-msg success';
+                    msg.textContent = data.message;
+                    await loadCredentialsStatus();
+                    setTimeout(closeCredsModal, 800);
+                } else {
+                    msg.className = 'creds-msg error';
+                    msg.textContent = data.error || 'Failed to save credentials';
+                }
+            } catch (e) {
+                msg.className = 'creds-msg error';
+                msg.textContent = 'Request failed: ' + e.message;
+            }
+        }
+
+        async function resetCredentials() {
+            const msg = document.getElementById('creds-msg');
+            try {
+                const res = await fetch('/api/credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reset: true }),
+                });
+                const data = await res.json();
+                msg.className = 'creds-msg success';
+                msg.textContent = data.message;
+                await loadCredentialsStatus();
+                setTimeout(closeCredsModal, 800);
+            } catch (e) {
+                msg.className = 'creds-msg error';
+                msg.textContent = 'Request failed: ' + e.message;
+            }
+        }
+
+        loadCredentialsStatus();
+
+        // ── Pré-Check Report ──────────────────────────────────────────────────
+
+        let currentReportRunId = null;
+        let currentReport = null;
+        let executionSelectedIds = [];  // captured at run time
+
+        document.getElementById('report-btn').addEventListener('click', async () => {
+            if (!currentExecutionId || !currentSuiteId) return;
+
+            const btn = document.getElementById('report-btn');
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+
+            try {
+                const res = await fetch('/api/generate-report', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        suite_id: currentSuiteId,
+                        execution_id: currentExecutionId,
+                        test_results: testResults,
+                        selected_test_case_ids: executionSelectedIds.length > 0 ? executionSelectedIds : null
+                    })
+                });
+                const data = await res.json();
+                if (data.error) { alert('Error generating report: ' + data.error); return; }
+
+                currentReportRunId = data.run_id;
+                currentReport = data.report;
+                showReportModal(data.report);
+            } catch (err) {
+                alert('Failed to generate report: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Pre-Check Report';
+            }
+        });
+
+        document.getElementById('report-download-btn').addEventListener('click', () => {
+            if (!currentReportRunId) return;
+            window.location.href = '/api/report/' + encodeURIComponent(currentReportRunId);
+        });
+
+        document.getElementById('load-report-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch('/api/load-report', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.error) { alert('Error loading report: ' + data.error); return; }
+
+                currentReport = data.report;
+                currentReportRunId = data.report.meta.run_id;
+                showReportModal(data.report);
+            } catch (err) {
+                alert('Error loading report: ' + err.message);
+            }
+
+            e.target.value = '';
+        });
+
+        document.getElementById('report-modal-overlay').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('report-modal-overlay')) closeReportModal();
+        });
+
+        function closeReportModal() {
+            document.getElementById('report-modal-overlay').classList.remove('active');
+        }
+
+        function showReportModal(report) {
+            document.getElementById('report-modal-content').innerHTML = renderReport(report);
+            document.getElementById('report-modal-overlay').classList.add('active');
+        }
+
+        function renderReport(report) {
+            const meta = report.meta;
+            const passRate = report.total > 0
+                ? ((report.passed / report.total) * 100).toFixed(1) + '%'
+                : '0.0%';
+
+            let html = `
+                <div class="report-header">
+                    <h1>Pre-Check Report &mdash; ${escHtml(meta.merchant_name)}</h1>
+                    <div class="report-meta">
+                        <div><strong>Run ID:</strong> ${escHtml(meta.run_id)}</div>
+                        <div><strong>Environment:</strong> ${escHtml(meta.ambiente)}</div>
+                        <div><strong>Mode:</strong> ${escHtml(meta.modo)}</div>
+                    </div>
+                </div>
+
+                <h2 style="font-size:1rem;margin:0 0 8px;">Summary</h2>
+                <table class="report-summary-table">
+                    <tbody>
+                        <tr><td>Total tests</td><td><strong>${report.total}</strong></td></tr>
+                        <tr><td>Passed</td><td style="color:#059669"><strong>${report.passed}</strong></td></tr>
+                        <tr><td>Failed</td><td style="color:#dc2626"><strong>${report.failed}</strong></td></tr>
+                        <tr><td>Skipped</td><td style="color:#6b7280"><strong>${report.skipped}</strong></td></tr>
+                        <tr><td>Pass rate</td><td><strong>${passRate}</strong></td></tr>
+                    </tbody>
+                </table>
+            `;
+
+            for (const section of (report.sections || [])) {
+                if (!section.rows || section.rows.length === 0) continue;
+                html += `
+                    <div class="report-section">
+                        <h2>${escHtml(section.category)}</h2>
+                        <table class="report-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Nome</th>
+                                    <th>Sev.</th>
+                                    <th>Tipo</th>
+                                    <th>Status</th>
+                                    <th>Motivo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                for (const row of section.rows) {
+                    const statusBadge = `<span class="status-badge ${escHtml(row.status)}">${escHtml(row.status)}</span>`;
+                    const sevBadge = `<span class="sev-badge ${escHtml(row.severity)}">${escHtml(row.severity)}</span>`;
+                    html += `
+                        <tr>
+                            <td style="font-family:monospace;font-size:0.78rem;white-space:nowrap">${escHtml(row.pre_check_id)}</td>
+                            <td>${escHtml(row.name)}</td>
+                            <td>${sevBadge}</td>
+                            <td style="white-space:nowrap">${escHtml(row.test_type)}</td>
+                            <td>${statusBadge}</td>
+                            <td style="max-width:280px;word-break:break-word;font-size:0.78rem;color:#555">${escHtml(row.reason || '')}</td>
+                        </tr>
+                    `;
+                }
+                html += '</tbody></table></div>';
+            }
+
+            return html;
+        }
+
+        function escHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
     </script>
 </body>
 </html>
@@ -2936,7 +3460,10 @@ def upload_file():
         # Store the test suite
         suite_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         uploaded_suites[suite_id] = test_suite
-        
+
+        # Build country lookup from scoping doc (integration_id -> country)
+        country_map = {i.integration_id: i.country for i in scoping_doc.integrations}
+
         # Build hierarchical structure for response
         hierarchy = []
         for pm_group in hierarchical_suite.payment_methods:
@@ -2945,12 +3472,13 @@ def upload_file():
                 'name': pm_group.payment_method,
                 'providers': []
             }
-            
+
             for provider_group in pm_group.providers:
                 provider_data = {
                     'id': provider_group.provider_id,
                     'name': provider_group.provider,
                     'integration_id': provider_group.integration_id,
+                    'country': country_map.get(provider_group.integration_id, 'BR'),
                     'test_cases': [
                         {
                             'id': tc.id,
@@ -2973,8 +3501,11 @@ def upload_file():
                     ]
                 }
                 pm_data['providers'].append(provider_data)
-            
+
             hierarchy.append(pm_data)
+
+        # Store hierarchy for Pré-Check Report generation
+        suite_hierarchies[suite_id] = hierarchy
         
         # Build response
         response_data = {
@@ -3272,7 +3803,7 @@ def execute_stream():
             execution_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             
             # Initialize components
-            api_client = APIClient(config)
+            api_client = APIClient(config, credentials=get_active_credentials())
             logger = CertificationLogger(execution_id, "logs")
             context = ExecutionContext()
             
@@ -3359,6 +3890,94 @@ def download_log(execution_id):
 
 
 # =============================================================================
+# Pré-Check Report Endpoints
+# =============================================================================
+
+@app.route('/api/generate-report', methods=['POST'])
+def generate_report_endpoint():
+    """Generate a Pré-Check Report from completed test execution results."""
+    from src.report_generator import generate_report, report_to_dict
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    suite_id = data.get('suite_id')
+    execution_id = data.get('execution_id')
+    test_results = data.get('test_results', {})
+    selected_test_case_ids = data.get('selected_test_case_ids')  # list or None
+
+    if not suite_id or suite_id not in uploaded_suites:
+        return jsonify({'error': 'Test suite not found'}), 404
+
+    test_suite = uploaded_suites[suite_id]
+    hierarchy = suite_hierarchies.get(suite_id, [])
+    config = load_config()
+
+    report = generate_report(
+        test_suite=test_suite,
+        test_results=test_results,
+        hierarchy=hierarchy,
+        execution_id=execution_id or 'unknown',
+        placeholder_mode=config.placeholder_mode,
+        selected_test_case_ids=selected_test_case_ids,
+    )
+
+    report_dict = report_to_dict(report)
+
+    # Save to reports/ directory
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+    safe_run_id = report.meta.run_id.replace('/', '').replace('..', '')
+    report_file = reports_dir / f"{safe_run_id}.json"
+    with open(report_file, 'w', encoding='utf-8') as f:
+        json.dump(report_dict, f, indent=2, ensure_ascii=False)
+
+    # Cache in memory
+    precheck_reports[report.meta.run_id] = report_dict
+
+    return jsonify({
+        'run_id': report.meta.run_id,
+        'report': report_dict,
+    })
+
+
+@app.route('/api/report/<run_id>')
+def download_report(run_id):
+    """Download a saved Pré-Check Report as JSON."""
+    safe_run_id = run_id.replace('/', '').replace('..', '').replace('\\', '')
+    report_file = Path("reports") / f"{safe_run_id}.json"
+
+    if not report_file.exists():
+        return jsonify({'error': 'Report not found'}), 404
+
+    return send_file(
+        report_file,
+        mimetype='application/json',
+        as_attachment=True,
+        download_name=f"{safe_run_id}.json"
+    )
+
+
+@app.route('/api/load-report', methods=['POST'])
+def load_report():
+    """Load a previously saved Pré-Check Report JSON file."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    f = request.files['file']
+    try:
+        content = f.read().decode('utf-8')
+        data = json.loads(content)
+        # Validate minimal required structure
+        if 'meta' not in data or 'sections' not in data:
+            return jsonify({'error': 'Invalid report file: missing required fields'}), 400
+        return jsonify({'report': data})
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return jsonify({'error': f'Invalid report file: {str(e)}'}), 400
+
+
+# =============================================================================
 # Payment Builder API Endpoints
 # =============================================================================
 
@@ -3403,6 +4022,63 @@ def get_payment_presets():
         return jsonify({'presets': presets})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/credentials', methods=['GET'])
+def get_credentials():
+    """Return current credential status (never exposes full secret values)."""
+    creds = get_active_credentials()
+    pub = creds.get("public_key", "")
+    priv = creds.get("private_key", "")
+    account = creds.get("account_id", "")
+    env = creds.get("environment", "sandbox")
+    configured = bool(pub and priv and account)
+    source = "runtime" if runtime_credentials else "env"
+
+    def mask(value: str) -> str:
+        if not value:
+            return ""
+        return value[:12] + "..." if len(value) > 12 else value[:4] + "..."
+
+    return jsonify({
+        "configured": configured,
+        "source": source,
+        "environment": env,
+        "public_key_preview": mask(pub),
+        "account_id_preview": mask(account),
+    })
+
+
+@app.route('/api/credentials', methods=['POST'])
+def set_credentials():
+    """Save runtime Yuno API credentials (overrides .env for this server session)."""
+    global runtime_credentials
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    if data.get("reset"):
+        runtime_credentials = {}
+        return jsonify({"success": True, "message": "Credentials reset to .env values"})
+
+    public_key = data.get("public_key", "").strip()
+    private_key = data.get("private_key", "").strip()
+    account_id = data.get("account_id", "").strip()
+    environment = data.get("environment", "sandbox").strip()
+
+    if not public_key or not private_key or not account_id:
+        return jsonify({"success": False, "error": "public_key, private_key, and account_id are required"}), 400
+
+    if environment not in ("sandbox", "production"):
+        return jsonify({"success": False, "error": "environment must be 'sandbox' or 'production'"}), 400
+
+    runtime_credentials = {
+        "public_key": public_key,
+        "private_key": private_key,
+        "account_id": account_id,
+        "environment": environment,
+    }
+    return jsonify({"success": True, "message": f"Credentials saved ({environment})"})
 
 
 @app.route('/api/datadog/query', methods=['POST'])
@@ -3502,7 +4178,7 @@ def e2e_start():
     config = load_config()
     if suite_id in provider_test_cards_storage:
         config.provider_test_cards = provider_test_cards_storage[suite_id]
-    api_client = APIClient(config)
+    api_client = APIClient(config, credentials=get_active_credentials())
 
     # Auto-create a Yuno customer if customer_payer.id is missing
     customer_payer = payment_data.get("customer_payer") or {}
@@ -3563,7 +4239,7 @@ def e2e_checkout(e2e_session_id):
         return "E2E session not found or expired", 404
 
     config = load_config()
-    api_client = APIClient(config)
+    api_client = APIClient(config, credentials=get_active_credentials())
 
     return render_template_string(
         E2E_CHECKOUT_TEMPLATE,
@@ -3598,7 +4274,7 @@ def e2e_payment():
     suite_id = session.get('suite_id')
     if suite_id and suite_id in provider_test_cards_storage:
         config.provider_test_cards = provider_test_cards_storage[suite_id]
-    api_client = APIClient(config)
+    api_client = APIClient(config, credentials=get_active_credentials())
 
     result = api_client.e2e_create_payment(
         provider=session['provider'],
